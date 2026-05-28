@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BTC 鍮꾩긽愿 ?뚰듃肄붿씤 ??쒕낫??/title>
+<title>BTC 비상관 알트코인 대시보드</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -85,38 +85,38 @@ body { background: #0a0e17; color: #e0e0e0; font-family: 'Segoe UI', sans-serif;
 </head>
 <body>
 <div class="header">
-  <h1><span>??/span> BTC 鍮꾩긽愿 ?뚰듃肄붿씤 ?ㅼ틦??/h1>
+  <h1><span>₿</span> BTC 비상관 알트코인 스캐너</h1>
   <div class="controls">
-    <label>湲곌컙</label>
+    <label>기간</label>
     <select id="period">
-      <option value="7">7??/option>
-      <option value="14">14??/option>
-      <option value="30" selected>30??/option>
-      <option value="90">90??/option>
+      <option value="7">7일</option>
+      <option value="14">14일</option>
+      <option value="30" selected>30일</option>
+      <option value="90">90일</option>
     </select>
-    <label>?곴?怨꾩닔 ??/label>
+    <label>상관계수 ≤</label>
     <input type="number" id="corrThreshold" value="0.4" min="-1" max="1" step="0.05" style="width:70px">
-    <label>理쒖냼 嫄곕옒?湲?M$)</label>
+    <label>최소 거래대금(M$)</label>
     <input type="number" id="minVolume" value="5" min="0" step="1" style="width:70px">
-    <label>嫄곕옒??湲됰벑 ??/label>
+    <label>거래량 급등 ≥</label>
     <input type="number" id="volSpikeThreshold" value="200" min="50" step="50" style="width:70px">
     <label>%</label>
     <div class="view-toggle">
-      <button class="active" onclick="setView('card')">移대뱶</button>
-      <button onclick="setView('table')">?뚯씠釉?/button>
+      <button class="active" onclick="setView('card')">카드</button>
+      <button onclick="setView('table')">테이블</button>
     </div>
-    <button id="scanBtn" onclick="startScan()">?ㅼ틪 ?쒖옉</button>
+    <button id="scanBtn" onclick="startScan()">스캔 시작</button>
   </div>
 </div>
 <div class="status-bar">
-  <span id="statusText">?ㅼ틪 踰꾪듉???뚮윭 ?쒖옉?섏꽭??/span>
+  <span id="statusText">스캔 버튼을 눌러 시작하세요</span>
   <div class="progress-wrap"><div class="progress-bar" id="progressBar"></div></div>
 </div>
 <div class="summary" id="summaryArea"></div>
 <div class="coin-grid" id="cardView"></div>
 <div class="table-view" id="tableView" style="display:none"></div>
 <div class="score-overlay" id="scoreOverlay" onclick="closeScorePopup()"></div>
-<div class="score-popup" id="scorePopup"><span class="close" onclick="closeScorePopup()">??/span><div id="scoreContent"></div></div>
+<div class="score-popup" id="scorePopup"><span class="close" onclick="closeScorePopup()">✕</span><div id="scoreContent"></div></div>
 
 <script>
 const BINANCE_API = 'https://api.binance.com/api/v3';
@@ -166,7 +166,7 @@ async function getKlines(symbol, interval, limit) {
   return data.map(k => ({ time: k[0], open: +k[1], high: +k[2], low: +k[3], close: +k[4], volume: +k[5], quoteVol: +k[7] }));
 }
 
-// OI + ??⑸퉬 議고쉶 (?좊Ъ 留덉폆)
+// OI + 펀딩비 조회 (선물 마켓)
 async function getFuturesData(symbol) {
   try {
     const [oiData, frData, oiHist] = await Promise.all([
@@ -176,7 +176,7 @@ async function getFuturesData(symbol) {
     ]);
     const oi = +oiData.openInterest;
     const fundingRate = +(frData.lastFundingRate || 0);
-    // OI 蹂?붿쑉
+    // OI 변화율
     let oiChgPct = 0;
     if (oiHist.length >= 2) {
       const prevOI = +oiHist[0].sumOpenInterest;
@@ -189,11 +189,11 @@ async function getFuturesData(symbol) {
   }
 }
 
-// ???二쇰Ц 鍮꾩쨷 遺꾩꽍 (理쒓렐 泥닿껐 ?댁뿭)
+// 대형 주문 비중 분석 (최근 체결 내역)
 async function getWhaleRatio(symbol, lastPrice) {
   try {
     const trades = await fetchJSON(`${BINANCE_API}/trades?symbol=${symbol}&limit=500`);
-    const WHALE_THRESHOLD = 1000; // $1,000 ?댁긽 = ???二쇰Ц
+    const WHALE_THRESHOLD = 1000; // $1,000 이상 = 대형 주문
     let totalVol = 0, whaleVol = 0, whaleCount = 0;
     trades.forEach(t => {
       const qty = +t.qty;
@@ -203,7 +203,7 @@ async function getWhaleRatio(symbol, lastPrice) {
       if (value >= WHALE_THRESHOLD) { whaleVol += value; whaleCount++; }
     });
     const whaleRatio = totalVol > 0 ? (whaleVol / totalVol) * 100 : 0;
-    // 留ㅼ닔/留ㅻ룄 援щ텇 (isBuyerMaker=false ???쒖옣媛 留ㅼ닔)
+    // 매수/매도 구분 (isBuyerMaker=false → 시장가 매수)
     let whaleBuyVol = 0, whaleSellVol = 0;
     trades.forEach(t => {
       const value = (+t.qty) * (+t.price);
@@ -217,13 +217,13 @@ async function getWhaleRatio(symbol, lastPrice) {
   }
 }
 
-// OI + ??⑸퉬 ?쒓렇???먯젙
+// OI + 펀딩비 시그널 판정
 function getOISignal(oiChgPct, fundingRate, todayReturn) {
-  if (oiChgPct <= -5) return { label: '?ъ????뺣━', emoji: '?삉', cls: 'oi-neutral' };
-  if (oiChgPct >= 5 && fundingRate < -0.0005) return { label: '?륁뒪?댁쫰 媛??, emoji: '?뵦', cls: 'oi-squeeze' };
-  if (oiChgPct >= 5 && fundingRate > 0.001) return { label: '濡?怨쇱뿴', emoji: '?좑툘', cls: 'oi-overheat' };
-  if (oiChgPct >= 5 && fundingRate > 0) return { label: '媛뺤꽭', emoji: '?윟', cls: 'oi-bull' };
-  if (oiChgPct >= 5 && fundingRate < 0) return { label: '?쎌꽭', emoji: '?뵶', cls: 'oi-bear' };
+  if (oiChgPct <= -5) return { label: '포지션 정리', emoji: '😐', cls: 'oi-neutral' };
+  if (oiChgPct >= 5 && fundingRate < -0.0005) return { label: '숏스퀴즈 가능', emoji: '🔥', cls: 'oi-squeeze' };
+  if (oiChgPct >= 5 && fundingRate > 0.001) return { label: '롱 과열', emoji: '⚠️', cls: 'oi-overheat' };
+  if (oiChgPct >= 5 && fundingRate > 0) return { label: '강세', emoji: '🟢', cls: 'oi-bull' };
+  if (oiChgPct >= 5 && fundingRate < 0) return { label: '약세', emoji: '🔴', cls: 'oi-bear' };
   return { label: '', emoji: '', cls: '' };
 }
 
@@ -243,7 +243,7 @@ async function getUSDTSymbols() {
 async function startScan() {
   const btn = document.getElementById('scanBtn');
   btn.disabled = true;
-  btn.textContent = '?ㅼ틪 以?..';
+  btn.textContent = '스캔 중...';
   const statusEl = document.getElementById('statusText');
   const progressEl = document.getElementById('progressBar');
   const period = +document.getElementById('period').value;
@@ -252,21 +252,21 @@ async function startScan() {
   const volSpikeThreshold = +document.getElementById('volSpikeThreshold').value;
 
   try {
-    statusEl.textContent = '嫄곕옒 媛???щ낵 濡쒕뵫 以?..';
+    statusEl.textContent = '거래 가능 심볼 로딩 중...';
     const allSymbols = await getUSDTSymbols();
 
-    statusEl.textContent = `BTC ?곗씠??濡쒕뵫 以?..`;
+    statusEl.textContent = `BTC 데이터 로딩 중...`;
     const btcKlines = await getKlines('BTCUSDT', '1d', period + 1);
     const btcReturns = toReturns(btcKlines.map(k => k.close));
 
     // pre-filter by 24h volume
-    statusEl.textContent = '24?쒓컙 嫄곕옒?됱쑝濡??ъ쟾 ?꾪꽣留?以?..';
+    statusEl.textContent = '24시간 거래량으로 사전 필터링 중...';
     const tickers = await fetchJSON(`${BINANCE_API}/ticker/24hr`);
     const tickerMap = {};
     tickers.forEach(t => { tickerMap[t.symbol] = +t.quoteVolume; });
 
     const candidates = allSymbols.filter(s => s.symbol !== 'BTCUSDT' && (tickerMap[s.symbol] || 0) >= minVol);
-    statusEl.textContent = `${candidates.length}媛??꾨낫 肄붿씤 遺꾩꽍 以?..`;
+    statusEl.textContent = `${candidates.length}개 후보 코인 분석 중...`;
 
     results = [];
     const batchSize = 3;
@@ -284,7 +284,7 @@ async function startScan() {
           const firstPrice = klines[0].close;
           const chgPct = ((lastPrice - firstPrice) / firstPrice) * 100;
 
-          // 嫄곕옒??肄붿씤 ?섎웾 湲곗?) 湲됰벑 遺꾩꽍: 理쒓렐 3???됯퇏 vs ?댁쟾 10???됯퇏
+          // 거래량(코인 수량 기준) 급등 분석: 최근 3일 평균 vs 이전 10일 평균
           const vols = klines.map(k => k.volume);
           const recent3 = vols.slice(-3);
           const prev10 = vols.slice(-13, -3);
@@ -296,7 +296,7 @@ async function startScan() {
           const vol24h = tickerMap[s.symbol] || 0;
           const avgDailyVol = vols.reduce((a,b) => a+b, 0) / vols.length;
 
-          // 3???됯퇏 ?먯씡 怨꾩궛
+          // 3일 평균 손익 계산
           const closes = klines.map(k => k.close);
           const last3Returns = [];
           for (let j = closes.length - 3; j < closes.length; j++) {
@@ -304,9 +304,10 @@ async function startScan() {
           }
           const avg3Return = last3Returns.length ? last3Returns.reduce((a,b) => a+b, 0) / last3Returns.length : 0;
 
-          // ?ㅻ뒛 ?섏씡瑜?          const todayReturn = closes.length >= 2 ? (closes[closes.length-1] - closes[closes.length-2]) / closes[closes.length-2] * 100 : 0;
+          // 오늘 수익률
+          const todayReturn = closes.length >= 2 ? (closes[closes.length-1] - closes[closes.length-2]) / closes[closes.length-2] * 100 : 0;
 
-          // ?댄룊???뺣같??泥댄겕 (5MA > 10MA > 20MA)
+          // 이평선 정배열 체크 (5MA > 10MA > 20MA)
           const calcMA = (arr, period) => {
             if (arr.length < period) return null;
             const slice = arr.slice(-period);
@@ -316,15 +317,15 @@ async function startScan() {
           const ma10 = calcMA(closes, 10);
           const ma20 = calcMA(closes, 20);
           const maAligned = (ma5 !== null && ma10 !== null && ma20 !== null) && (ma5 > ma10 && ma10 > ma20);
-          // 理쒓렐 ?꾪솚 媛먯?: ?댁젣 湲곗??쇰줈???뺣같?댁씠 ?꾨땲?덈뒗吏
+          // 최근 전환 감지: 어제 기준으로는 정배열이 아니었는지
           const closesYd = closes.slice(0, -1);
           const ma5y = calcMA(closesYd, 5);
           const ma10y = calcMA(closesYd, 10);
           const ma20y = calcMA(closesYd, 20);
           const maAlignedYd = (ma5y !== null && ma10y !== null && ma20y !== null) && (ma5y > ma10y && ma10y > ma20y);
-          const maJustAligned = maAligned && !maAlignedYd; // ?ㅻ뒛 留??뺣같???꾪솚
+          const maJustAligned = maAligned && !maAlignedYd; // 오늘 막 정배열 전환
 
-          // OI + ??⑸퉬 + ??뺤＜臾?遺꾩꽍
+          // OI + 펀딩비 + 대형주문 분석
           const [futuresData, whaleData] = await Promise.all([
             getFuturesData(s.symbol),
             getWhaleRatio(s.symbol, lastPrice)
@@ -343,21 +344,21 @@ async function startScan() {
       const batchResults = await Promise.all(promises);
       batchResults.forEach(r => { if (r) results.push(r); });
       progressEl.style.width = Math.min(100, ((i + batchSize) / candidates.length * 100)).toFixed(0) + '%';
-      statusEl.textContent = `遺꾩꽍 以?.. ${Math.min(i + batchSize, candidates.length)}/${candidates.length} (諛쒓껄: ${results.length}媛?`;
+      statusEl.textContent = `분석 중... ${Math.min(i + batchSize, candidates.length)}/${candidates.length} (발견: ${results.length}개)`;
     }
 
-    // ?곸듅 媛?μ꽦 ?먯닔 怨꾩궛
+    // 상승 가능성 점수 계산
     results.forEach(r => {
       const sd = {}; // score detail
 
-      // ?ㅻ뒛 ?섏씡瑜?(15??
+      // 오늘 수익률 (15점)
       if (r.todayReturn >= 10) sd.today = 15;
       else if (r.todayReturn >= 5) sd.today = 12;
       else if (r.todayReturn >= 0) sd.today = 5;
       else if (r.todayReturn >= -5) sd.today = -3;
       else sd.today = -10;
 
-      // 3???됯퇏 ?먯씡 (20??
+      // 3일 평균 손익 (20점)
       if (r.avg3Return >= 10) sd.avg3 = 20;
       else if (r.avg3Return >= 5) sd.avg3 = 16;
       else if (r.avg3Return >= 2) sd.avg3 = 12;
@@ -365,19 +366,19 @@ async function startScan() {
       else if (r.avg3Return >= -3) sd.avg3 = -3;
       else sd.avg3 = -10;
 
-      // ?댄룊???뺣같??(15??
+      // 이평선 정배열 (15점)
       if (r.maJustAligned) sd.ma = 15;
       else if (r.maAligned) sd.ma = 10;
       else sd.ma = 0;
 
-      // 嫄곕옒??湲됰벑 (15??
+      // 거래량 급등 (15점)
       if (r.volSpikePct >= 200) sd.vol = 15;
       else if (r.volSpikePct >= 100) sd.vol = 10;
       else if (r.volSpikePct >= 50) sd.vol = 5;
       else if (r.volSpikePct < -30) sd.vol = -5;
       else sd.vol = 0;
 
-      // OI 利앷? (10??
+      // OI 증가 (10점)
       sd.oi = 0;
       if (r.hasFutures) {
         if (r.oiChgPct >= 10) sd.oi = 10;
@@ -386,7 +387,7 @@ async function startScan() {
         else sd.oi = -3;
       }
 
-      // ??⑸퉬 諛⑺뼢 (10??
+      // 펀딩비 방향 (10점)
       sd.fr = 0;
       if (r.hasFutures) {
         const fr = r.fundingRate;
@@ -396,10 +397,10 @@ async function startScan() {
         else if (fr < 0) sd.fr = 2;
       }
 
-      // ?륁뒪?댁쫰 媛??(10??
+      // 숏스퀴즈 가능 (10점)
       sd.squeeze = r.oiSignal.cls === 'oi-squeeze' ? 10 : 0;
 
-      // 怨좊옒 鍮꾩쨷 (5??
+      // 고래 비중 (5점)
       if (r.whaleRatio >= 50) sd.whale = 5;
       else if (r.whaleRatio >= 30) sd.whale = 3;
       else if (r.whaleRatio >= 10) sd.whale = 1;
@@ -409,16 +410,16 @@ async function startScan() {
       r.bullScore = sd.today + sd.avg3 + sd.ma + sd.vol + sd.oi + sd.fr + sd.squeeze + sd.whale;
     });
 
-    // ?먯닔 ?믪? ???뺣젹
+    // 점수 높은 순 정렬
     results.sort((a,b) => b.bullScore - a.bullScore);
     renderSummary(results, candidates.length);
     renderResults(results);
-    statusEl.textContent = `?꾨즺! ${candidates.length}媛?以?${results.length}媛?鍮꾩긽愿 肄붿씤 諛쒓껄`;
+    statusEl.textContent = `완료! ${candidates.length}개 중 ${results.length}개 비상관 코인 발견`;
   } catch (e) {
-    statusEl.textContent = `?먮윭: ${e.message}`;
+    statusEl.textContent = `에러: ${e.message}`;
   }
   btn.disabled = false;
-  btn.textContent = '?ㅼ틪 ?쒖옉';
+  btn.textContent = '스캔 시작';
 }
 
 function renderSummary(res, total) {
@@ -427,11 +428,11 @@ function renderSummary(res, total) {
   const spikeCount = res.filter(r => r.hasVolSpike).length;
   const avgCorr = res.length ? (res.reduce((a,r) => a + r.corr, 0) / res.length).toFixed(3) : '-';
   area.innerHTML = `
-    <div class="stat"><div class="val">${total}</div><div class="lbl">遺꾩꽍 肄붿씤</div></div>
-    <div class="stat"><div class="val">${res.length}</div><div class="lbl">鍮꾩긽愿 肄붿씤</div></div>
-    <div class="stat"><div class="val">${negCorr}</div><div class="lbl">??긽愿 肄붿씤</div></div>
-    <div class="stat"><div class="val" style="color:#fb923c">${spikeCount}</div><div class="lbl">?뵦 嫄곕옒??湲됰벑</div></div>
-    <div class="stat"><div class="val">${avgCorr}</div><div class="lbl">?됯퇏 ?곴?怨꾩닔</div></div>
+    <div class="stat"><div class="val">${total}</div><div class="lbl">분석 코인</div></div>
+    <div class="stat"><div class="val">${res.length}</div><div class="lbl">비상관 코인</div></div>
+    <div class="stat"><div class="val">${negCorr}</div><div class="lbl">역상관 코인</div></div>
+    <div class="stat"><div class="val" style="color:#fb923c">${spikeCount}</div><div class="lbl">🔥 거래량 급등</div></div>
+    <div class="stat"><div class="val">${avgCorr}</div><div class="lbl">평균 상관계수</div></div>
   `;
 }
 
@@ -452,34 +453,34 @@ function renderCards(res) {
   Object.values(chartInstances).forEach(c => c.destroy());
   chartInstances = {};
 
-  if (!res.length) { grid.innerHTML = '<div class="no-results">議곌굔??留욌뒗 肄붿씤???놁뒿?덈떎. 湲곗???議곗젙??蹂댁꽭??</div>'; return; }
+  if (!res.length) { grid.innerHTML = '<div class="no-results">조건에 맞는 코인이 없습니다. 기준을 조정해 보세요.</div>'; return; }
 
   grid.innerHTML = res.map((r, i) => `
     <div class="coin-card${r.corr < 0 ? ' highlight' : ''}${r.hasVolSpike ? ' vol-spike' : ''}">
       <div class="coin-header">
-        <div class="coin-name">${r.base}<small>/USDT</small> <span class="score-btn" onclick="event.stopPropagation();showScore(${i})" style="font-size:12px; padding:2px 6px; border-radius:4px; font-weight:700; background:${r.bullScore >= 50 ? '#166534' : r.bullScore >= 30 ? '#14532d' : r.bullScore >= 10 ? '#1e3a1e' : r.bullScore >= 0 ? '#1e293b' : '#451a1a'}; color:${r.bullScore >= 30 ? '#4ade80' : r.bullScore >= 10 ? '#86efac' : r.bullScore >= 0 ? '#94a3b8' : '#f87171'}">${r.bullScore}??/span></div>
+        <div class="coin-name">${r.base}<small>/USDT</small> <span class="score-btn" onclick="event.stopPropagation();showScore(${i})" style="font-size:12px; padding:2px 6px; border-radius:4px; font-weight:700; background:${r.bullScore >= 50 ? '#166534' : r.bullScore >= 30 ? '#14532d' : r.bullScore >= 10 ? '#1e3a1e' : r.bullScore >= 0 ? '#1e293b' : '#451a1a'}; color:${r.bullScore >= 30 ? '#4ade80' : r.bullScore >= 10 ? '#86efac' : r.bullScore >= 0 ? '#94a3b8' : '#f87171'}">${r.bullScore}점</span></div>
         <div class="coin-badges">
-          <span class="badge corr">? = ${r.corr.toFixed(3)}<span class="tip">BTC????곴?怨꾩닔 (${Math.abs(r.corr) < 0.1 ? '嫄곗쓽 臾닿?' : Math.abs(r.corr) < 0.3 ? '?쏀븳 ?곴?' : '蹂댄넻 ?곴?'})</span></span>
-          ${r.hasVolSpike ? `<span class="badge vol-spike">?뵦 嫄곕옒??+${r.volSpikePct.toFixed(0)}%<span class="tip">3???됯퇏 嫄곕옒?됱씠 10???됯퇏 ?鍮?${r.volSpikePct.toFixed(0)}% 湲됰벑</span></span>` : `<span class="badge ${r.volSpikePct >= 0 ? 'vol-up' : 'vol-down'}">嫄곕옒??${r.volSpikePct >= 0 ? '+' : ''}${r.volSpikePct.toFixed(0)}%<span class="tip">3???됯퇏 嫄곕옒??vs 10???됯퇏 蹂?붿쑉</span></span>`}
-          <span class="badge ${r.todayReturn >= 0 ? 'vol-up' : 'vol-down'}">?ㅻ뒛 ${r.todayReturn >= 0 ? '+' : ''}${r.todayReturn.toFixed(1)}%<span class="tip">?ㅻ뒛 ?섎（ ?섏씡瑜?(?꾩씪 醫낃? ?鍮?</span></span>
-          ${r.maJustAligned ? '<span class="badge ma-just">?? ?뺣같???꾪솚<span class="tip">5??> 10??> 20???댄룊???뺣같?대줈 ?ㅻ뒛 ?꾪솚??/span></span>' : r.maAligned ? '<span class="badge ma-aligned">?뱢 ?뺣같??span class="tip">5??> 10??> 20???댄룊???뺣같???좎? 以?/span></span>' : ''}
-          ${r.oiSignal.label ? `<span class="badge ${r.oiSignal.cls}">${r.oiSignal.emoji} ${r.oiSignal.label}<span class="tip">${r.oiSignal.cls === 'oi-squeeze' ? 'OI 利앷? + ??怨쇰?吏???湲됰벑 ?????곗뇙泥?궛 媛?? : r.oiSignal.cls === 'oi-overheat' ? 'OI 利앷? + 濡?怨쇰?吏????섎씫 ??濡??곗뇙泥?궛 ?꾪뿕' : r.oiSignal.cls === 'oi-bull' ? 'OI 利앷? + 濡??곗꽭 ??嫄닿컯???곸듅 異붿꽭' : r.oiSignal.cls === 'oi-bear' ? 'OI 利앷? + ???곗꽭 ???섎씫 異붿꽭' : 'OI 媛먯냼 ???ъ????뺣━ 以? 愿留앹꽭'}</span></span>` : ''}
-          ${r.whaleRatio >= 30 ? `<span class="badge whale">?릩 怨좊옒 ${r.whaleRatio.toFixed(0)}%<span class="tip">理쒓렐 500嫄?泥닿껐 以?$1,000+ ??뺤＜臾?鍮꾩쨷 ${r.whaleRatio.toFixed(0)}%</span></span>` : ''}
+          <span class="badge corr">ρ = ${r.corr.toFixed(3)}<span class="tip">BTC와의 상관계수 (${Math.abs(r.corr) < 0.1 ? '거의 무관' : Math.abs(r.corr) < 0.3 ? '약한 상관' : '보통 상관'})</span></span>
+          ${r.hasVolSpike ? `<span class="badge vol-spike">🔥 거래량 +${r.volSpikePct.toFixed(0)}%<span class="tip">3일 평균 거래량이 10일 평균 대비 ${r.volSpikePct.toFixed(0)}% 급등</span></span>` : `<span class="badge ${r.volSpikePct >= 0 ? 'vol-up' : 'vol-down'}">거래량 ${r.volSpikePct >= 0 ? '+' : ''}${r.volSpikePct.toFixed(0)}%<span class="tip">3일 평균 거래량 vs 10일 평균 변화율</span></span>`}
+          <span class="badge ${r.todayReturn >= 0 ? 'vol-up' : 'vol-down'}">오늘 ${r.todayReturn >= 0 ? '+' : ''}${r.todayReturn.toFixed(1)}%<span class="tip">오늘 하루 수익률 (전일 종가 대비)</span></span>
+          ${r.maJustAligned ? '<span class="badge ma-just">🚀 정배열 전환<span class="tip">5일 > 10일 > 20일 이평선 정배열로 오늘 전환됨</span></span>' : r.maAligned ? '<span class="badge ma-aligned">📈 정배열<span class="tip">5일 > 10일 > 20일 이평선 정배열 유지 중</span></span>' : ''}
+          ${r.oiSignal.label ? `<span class="badge ${r.oiSignal.cls}">${r.oiSignal.emoji} ${r.oiSignal.label}<span class="tip">${r.oiSignal.cls === 'oi-squeeze' ? 'OI 증가 + 숏 과밀집 → 급등 시 숏 연쇄청산 가능' : r.oiSignal.cls === 'oi-overheat' ? 'OI 증가 + 롱 과밀집 → 하락 시 롱 연쇄청산 위험' : r.oiSignal.cls === 'oi-bull' ? 'OI 증가 + 롱 우세 → 건강한 상승 추세' : r.oiSignal.cls === 'oi-bear' ? 'OI 증가 + 숏 우세 → 하락 추세' : 'OI 감소 → 포지션 정리 중, 관망세'}</span></span>` : ''}
+          ${r.whaleRatio >= 30 ? `<span class="badge whale">🐋 고래 ${r.whaleRatio.toFixed(0)}%<span class="tip">최근 500건 체결 중 $1,000+ 대형주문 비중 ${r.whaleRatio.toFixed(0)}%</span></span>` : ''}
         </div>
       </div>
       <div class="coin-stats">
-        <span>媛寃?<span class="v">$${r.lastPrice < 1 ? r.lastPrice.toPrecision(4) : fmtNum(r.lastPrice)}</span></span>
-        <span>3???됯퇏 ?먯씡 <span class="v" style="color:${r.avg3Return >= 0 ? '#4ade80' : '#f87171'}; background:${r.avg3Return >= 0 ? 'rgba(74,222,128,0.15)' : 'rgba(248,113,113,0.15)'}; padding:1px 5px; border-radius:3px">${r.avg3Return >= 0 ? '?? : '??} ${r.avg3Return >= 0 ? '+' : ''}${r.avg3Return.toFixed(1)}%</span></span>
-        <span>3???됯퇏 嫄곕옒??<span class="v">${fmtNum(r.avg3Vol)}</span></span>
-        <span>10???됯퇏 嫄곕옒??<span class="v">${fmtNum(r.avg10Vol)}</span></span>
+        <span>가격 <span class="v">$${r.lastPrice < 1 ? r.lastPrice.toPrecision(4) : fmtNum(r.lastPrice)}</span></span>
+        <span>3일 평균 손익 <span class="v" style="color:${r.avg3Return >= 0 ? '#4ade80' : '#f87171'}; background:${r.avg3Return >= 0 ? 'rgba(74,222,128,0.15)' : 'rgba(248,113,113,0.15)'}; padding:1px 5px; border-radius:3px">${r.avg3Return >= 0 ? '▲' : '▼'} ${r.avg3Return >= 0 ? '+' : ''}${r.avg3Return.toFixed(1)}%</span></span>
+        <span>3일 평균 거래량 <span class="v">${fmtNum(r.avg3Vol)}</span></span>
+        <span>10일 평균 거래량 <span class="v">${fmtNum(r.avg10Vol)}</span></span>
       </div>
       <div class="coin-extra">
         ${r.hasFutures ? `
-          <span class="tag">OI(24h) <span class="v" style="color:${r.oiChgPct >= 0 ? '#4ade80' : '#f87171'}; background:${r.oiChgPct >= 0 ? 'rgba(74,222,128,0.15)' : 'rgba(248,113,113,0.15)'}; padding:1px 5px; border-radius:3px">${r.oiChgPct >= 0 ? '?? : '??} ${r.oiChgPct >= 0 ? '+' : ''}${r.oiChgPct.toFixed(1)}%</span></span>
-          <span class="tag">??⑸퉬 <span class="v" style="color:${r.fundingRate >= 0 ? '#4ade80' : '#f87171'}; background:${r.fundingRate >= 0 ? 'rgba(74,222,128,0.15)' : 'rgba(248,113,113,0.15)'}; padding:1px 5px; border-radius:3px">${r.fundingRate >= 0 ? '?? : '??} ${(r.fundingRate * 100).toFixed(4)}%</span></span>
-        ` : '<span class="tag">?좊Ъ <span class="v">?놁쓬</span></span>'}
-        <span class="tag">??뺤＜臾?$1K+) <span class="v">${r.whaleRatio.toFixed(1)}% (${r.whaleCount}嫄?</span></span>
-        ${r.whaleCount > 0 ? `<span class="tag" style="min-width:80px">留ㅼ닔/留ㅻ룄<div class="whale-bar"><div class="buy" style="width:${r.whaleBuyVol + r.whaleSellVol > 0 ? (r.whaleBuyVol / (r.whaleBuyVol + r.whaleSellVol) * 100).toFixed(0) : 50}%"></div><div class="sell" style="width:${r.whaleBuyVol + r.whaleSellVol > 0 ? (r.whaleSellVol / (r.whaleBuyVol + r.whaleSellVol) * 100).toFixed(0) : 50}%"></div></div></span>` : ''}
+          <span class="tag">OI(24h) <span class="v" style="color:${r.oiChgPct >= 0 ? '#4ade80' : '#f87171'}; background:${r.oiChgPct >= 0 ? 'rgba(74,222,128,0.15)' : 'rgba(248,113,113,0.15)'}; padding:1px 5px; border-radius:3px">${r.oiChgPct >= 0 ? '▲' : '▼'} ${r.oiChgPct >= 0 ? '+' : ''}${r.oiChgPct.toFixed(1)}%</span></span>
+          <span class="tag">펀딩비 <span class="v" style="color:${r.fundingRate >= 0 ? '#4ade80' : '#f87171'}; background:${r.fundingRate >= 0 ? 'rgba(74,222,128,0.15)' : 'rgba(248,113,113,0.15)'}; padding:1px 5px; border-radius:3px">${r.fundingRate >= 0 ? '▲' : '▼'} ${(r.fundingRate * 100).toFixed(4)}%</span></span>
+        ` : '<span class="tag">선물 <span class="v">없음</span></span>'}
+        <span class="tag">대형주문($1K+) <span class="v">${r.whaleRatio.toFixed(1)}% (${r.whaleCount}건)</span></span>
+        ${r.whaleCount > 0 ? `<span class="tag" style="min-width:80px">매수/매도<div class="whale-bar"><div class="buy" style="width:${r.whaleBuyVol + r.whaleSellVol > 0 ? (r.whaleBuyVol / (r.whaleBuyVol + r.whaleSellVol) * 100).toFixed(0) : 50}%"></div><div class="sell" style="width:${r.whaleBuyVol + r.whaleSellVol > 0 ? (r.whaleSellVol / (r.whaleBuyVol + r.whaleSellVol) * 100).toFixed(0) : 50}%"></div></div></span>` : ''}
       </div>
       <div class="chart-wrap" style="cursor:pointer" onclick="window.open('https://www.tradingview.com/chart/AGxW3D6C/?symbol=BINANCE:${r.base}USDT','_blank')"><canvas id="chart_${i}"></canvas></div>
     </div>
@@ -493,14 +494,14 @@ function renderCards(res) {
       data: {
         labels,
         datasets: [{
-          label: '媛寃?,
+          label: '가격',
           data: r.klines.map(k => k.close),
           borderColor: r.avg3Return >= 0 ? '#4ade80' : '#f87171',
           backgroundColor: (r.avg3Return >= 0 ? 'rgba(74,222,128,' : 'rgba(248,113,113,') + '0.08)',
           fill: true, tension: 0.3, pointRadius: 0, borderWidth: 1.5,
           yAxisID: 'y'
         }, {
-          label: '嫄곕옒??,
+          label: '거래량',
           data: r.klines.map(k => k.volume),
           type: 'bar',
           backgroundColor: 'rgba(59,130,246,0.25)',
@@ -525,26 +526,26 @@ function renderCards(res) {
 
 function renderTable(res) {
   const div = document.getElementById('tableView');
-  if (!res.length) { div.innerHTML = '<div class="no-results">議곌굔??留욌뒗 肄붿씤???놁뒿?덈떎.</div>'; return; }
+  if (!res.length) { div.innerHTML = '<div class="no-results">조건에 맞는 코인이 없습니다.</div>'; return; }
   div.innerHTML = `<table>
     <thead><tr>
-      <th onclick="sortTable('bullScore')">?먯닔</th>
-      <th onclick="sortTable('base')">肄붿씤</th>
-      <th onclick="sortTable('corr')">?곴?怨꾩닔</th>
-      <th onclick="sortTable('lastPrice')">媛寃?/th>
-      <th onclick="sortTable('avg3Return')">3???됯퇏 ?먯씡</th>
-      <th onclick="sortTable('todayReturn')">?ㅻ뒛 ?섏씡瑜?/th>
-      <th onclick="sortTable('avg3Vol')">3???됯퇏 嫄곕옒??/th>
-      <th onclick="sortTable('avg10Vol')">10???됯퇏 嫄곕옒??/th>
-      <th onclick="sortTable('volSpikePct')">湲됰벑瑜?/th>
-      <th onclick="sortTable('maAligned')">?댄룊 ?뺣같??/th>
+      <th onclick="sortTable('bullScore')">점수</th>
+      <th onclick="sortTable('base')">코인</th>
+      <th onclick="sortTable('corr')">상관계수</th>
+      <th onclick="sortTable('lastPrice')">가격</th>
+      <th onclick="sortTable('avg3Return')">3일 평균 손익</th>
+      <th onclick="sortTable('todayReturn')">오늘 수익률</th>
+      <th onclick="sortTable('avg3Vol')">3일 평균 거래량</th>
+      <th onclick="sortTable('avg10Vol')">10일 평균 거래량</th>
+      <th onclick="sortTable('volSpikePct')">급등률</th>
+      <th onclick="sortTable('maAligned')">이평 정배열</th>
       <th onclick="sortTable('oiChgPct')">OI(24h)</th>
-      <th onclick="sortTable('fundingRate')">??⑸퉬</th>
-      <th onclick="sortTable('whaleRatio')">怨좊옒鍮꾩쨷</th>
+      <th onclick="sortTable('fundingRate')">펀딩비</th>
+      <th onclick="sortTable('whaleRatio')">고래비중</th>
     </tr></thead>
     <tbody>${res.map(r => `<tr${r.hasVolSpike ? ' style="background:#1a1000"' : ''}>
       <td class="${r.bullScore >= 30 ? 'pos' : r.bullScore < 0 ? 'neg' : ''}" style="font-weight:700">${r.bullScore}</td>
-      <td><a href="https://www.tradingview.com/chart/AGxW3D6C/?symbol=BINANCE:${r.base}USDT" target="_blank" style="color:#60a5fa;text-decoration:none"><strong>${r.base}</strong>/USDT</a> ${r.hasVolSpike ? '?뵦' : ''}</td>
+      <td><a href="https://www.tradingview.com/chart/AGxW3D6C/?symbol=BINANCE:${r.base}USDT" target="_blank" style="color:#60a5fa;text-decoration:none"><strong>${r.base}</strong>/USDT</a> ${r.hasVolSpike ? '🔥' : ''}</td>
       <td class="${r.corr < 0 ? 'neg' : ''}">${r.corr.toFixed(3)}</td>
       <td>$${r.lastPrice < 1 ? r.lastPrice.toPrecision(4) : fmtNum(r.lastPrice)}</td>
       <td class="${r.avg3Return >= 0 ? 'pos' : 'neg'}">${r.avg3Return >= 0 ? '+' : ''}${r.avg3Return.toFixed(1)}%</td>
@@ -552,10 +553,10 @@ function renderTable(res) {
       <td>${fmtNum(r.avg3Vol)}</td>
       <td>${fmtNum(r.avg10Vol)}</td>
       <td class="${r.volSpikePct >= 200 ? 'pos' : r.volSpikePct >= 0 ? '' : 'neg'}" style="${r.hasVolSpike ? 'font-weight:700' : ''}">${r.volSpikePct >= 0 ? '+' : ''}${r.volSpikePct.toFixed(0)}%</td>
-      <td class="${r.maAligned ? 'pos' : ''}">${r.maJustAligned ? '?? ?꾪솚' : r.maAligned ? '?뱢 ?뺣같?? : '-'}</td>
-      <td class="${r.oiChgPct >= 0 ? 'pos' : 'neg'}">${r.hasFutures ? (r.oiChgPct >= 0 ? '??' : '??) + r.oiChgPct.toFixed(1) + '%' : '-'}</td>
-      <td class="${r.fundingRate >= 0 ? 'pos' : 'neg'}">${r.hasFutures ? (r.fundingRate >= 0 ? '??' : '??') + (r.fundingRate * 100).toFixed(4) + '%' : '-'}</td>
-      <td>${r.whaleRatio.toFixed(1)}%${r.whaleCount > 0 ? ' ?릩' : ''}</td>
+      <td class="${r.maAligned ? 'pos' : ''}">${r.maJustAligned ? '🚀 전환' : r.maAligned ? '📈 정배열' : '-'}</td>
+      <td class="${r.oiChgPct >= 0 ? 'pos' : 'neg'}">${r.hasFutures ? (r.oiChgPct >= 0 ? '▲+' : '▼') + r.oiChgPct.toFixed(1) + '%' : '-'}</td>
+      <td class="${r.fundingRate >= 0 ? 'pos' : 'neg'}">${r.hasFutures ? (r.fundingRate >= 0 ? '▲ ' : '▼ ') + (r.fundingRate * 100).toFixed(4) + '%' : '-'}</td>
+      <td>${r.whaleRatio.toFixed(1)}%${r.whaleCount > 0 ? ' 🐋' : ''}</td>
     </tr>`).join('')}</tbody></table>`;
 }
 
@@ -578,18 +579,18 @@ function showScore(idx) {
   const r = results[idx];
   const sd = r.scoreDetail;
   document.getElementById('scoreContent').innerHTML = `
-    <div class="title">${r.base}/USDT ?곸듅 媛?μ꽦 諛곗젏</div>
+    <div class="title">${r.base}/USDT 상승 가능성 배점</div>
     <table>
-      <tr><th>??ぉ</th><th>?꾩옱 媛?/th><th style="text-align:right">諛곗젏</th></tr>
-      <tr><td>?ㅻ뒛 ?섏씡瑜?/td><td>${r.todayReturn >= 0 ? '+' : ''}${r.todayReturn.toFixed(1)}%</td><td style="text-align:right">${fmtScore(sd.today, 15)}</td></tr>
-      <tr><td>3???됯퇏 ?먯씡</td><td>${r.avg3Return >= 0 ? '+' : ''}${r.avg3Return.toFixed(1)}%</td><td style="text-align:right">${fmtScore(sd.avg3, 20)}</td></tr>
-      <tr><td>?댄룊???뺣같??/td><td>${r.maJustAligned ? '?? ?꾪솚' : r.maAligned ? '?뱢 ?좎?' : '???놁쓬'}</td><td style="text-align:right">${fmtScore(sd.ma, 15)}</td></tr>
-      <tr><td>嫄곕옒??蹂??/td><td>${r.volSpikePct >= 0 ? '+' : ''}${r.volSpikePct.toFixed(0)}%</td><td style="text-align:right">${fmtScore(sd.vol, 15)}</td></tr>
-      <tr><td>OI 蹂??24h)</td><td>${r.hasFutures ? (r.oiChgPct >= 0 ? '+' : '') + r.oiChgPct.toFixed(1) + '%' : '?좊Ъ ?놁쓬'}</td><td style="text-align:right">${fmtScore(sd.oi, 10)}</td></tr>
-      <tr><td>??⑸퉬</td><td>${r.hasFutures ? (r.fundingRate * 100).toFixed(4) + '%' : '?좊Ъ ?놁쓬'}</td><td style="text-align:right">${fmtScore(sd.fr, 10)}</td></tr>
-      <tr><td>?륁뒪?댁쫰</td><td>${sd.squeeze > 0 ? '?뵦 媛?? : '-'}</td><td style="text-align:right">${fmtScore(sd.squeeze, 10)}</td></tr>
-      <tr><td>怨좊옒 鍮꾩쨷</td><td>${r.whaleRatio.toFixed(1)}% (${r.whaleCount}嫄?</td><td style="text-align:right">${fmtScore(sd.whale, 5)}</td></tr>
-      <tr class="total"><td colspan="2" style="padding-top:10px">?⑷퀎</td><td style="text-align:right;padding-top:10px;color:${r.bullScore >= 30 ? '#4ade80' : r.bullScore >= 0 ? '#94a3b8' : '#f87171'}">${r.bullScore} / 100</td></tr>
+      <tr><th>항목</th><th>현재 값</th><th style="text-align:right">배점</th></tr>
+      <tr><td>오늘 수익률</td><td>${r.todayReturn >= 0 ? '+' : ''}${r.todayReturn.toFixed(1)}%</td><td style="text-align:right">${fmtScore(sd.today, 15)}</td></tr>
+      <tr><td>3일 평균 손익</td><td>${r.avg3Return >= 0 ? '+' : ''}${r.avg3Return.toFixed(1)}%</td><td style="text-align:right">${fmtScore(sd.avg3, 20)}</td></tr>
+      <tr><td>이평선 정배열</td><td>${r.maJustAligned ? '🚀 전환' : r.maAligned ? '📈 유지' : '❌ 없음'}</td><td style="text-align:right">${fmtScore(sd.ma, 15)}</td></tr>
+      <tr><td>거래량 변화</td><td>${r.volSpikePct >= 0 ? '+' : ''}${r.volSpikePct.toFixed(0)}%</td><td style="text-align:right">${fmtScore(sd.vol, 15)}</td></tr>
+      <tr><td>OI 변화(24h)</td><td>${r.hasFutures ? (r.oiChgPct >= 0 ? '+' : '') + r.oiChgPct.toFixed(1) + '%' : '선물 없음'}</td><td style="text-align:right">${fmtScore(sd.oi, 10)}</td></tr>
+      <tr><td>펀딩비</td><td>${r.hasFutures ? (r.fundingRate * 100).toFixed(4) + '%' : '선물 없음'}</td><td style="text-align:right">${fmtScore(sd.fr, 10)}</td></tr>
+      <tr><td>숏스퀴즈</td><td>${sd.squeeze > 0 ? '🔥 가능' : '-'}</td><td style="text-align:right">${fmtScore(sd.squeeze, 10)}</td></tr>
+      <tr><td>고래 비중</td><td>${r.whaleRatio.toFixed(1)}% (${r.whaleCount}건)</td><td style="text-align:right">${fmtScore(sd.whale, 5)}</td></tr>
+      <tr class="total"><td colspan="2" style="padding-top:10px">합계</td><td style="text-align:right;padding-top:10px;color:${r.bullScore >= 30 ? '#4ade80' : r.bullScore >= 0 ? '#94a3b8' : '#f87171'}">${r.bullScore} / 100</td></tr>
     </table>`;
   document.getElementById('scoreOverlay').style.display = 'block';
   document.getElementById('scorePopup').style.display = 'block';
