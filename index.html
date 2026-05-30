@@ -487,7 +487,7 @@ function renderCards(res) {
         <span class="tag">대형주문($1K+) <span class="v">${r.whaleRatio.toFixed(1)}% (${r.whaleCount}건)</span></span>
         ${r.whaleCount > 0 ? `<span class="tag" style="min-width:80px">매수/매도<div class="whale-bar"><div class="buy" style="width:${r.whaleBuyVol + r.whaleSellVol > 0 ? (r.whaleBuyVol / (r.whaleBuyVol + r.whaleSellVol) * 100).toFixed(0) : 50}%"></div><div class="sell" style="width:${r.whaleBuyVol + r.whaleSellVol > 0 ? (r.whaleSellVol / (r.whaleBuyVol + r.whaleSellVol) * 100).toFixed(0) : 50}%"></div></div></span>` : ''}
       </div>
-      <div class="chart-wrap" style="cursor:pointer" onclick="window.open('https://www.tradingview.com/chart/AGxW3D6C/?symbol=BINANCE:${r.base}USDT','_blank')"><canvas id="chart_${i}"></canvas></div>
+      <div class="chart-wrap" style="cursor:pointer" onclick="window.open('https://www.tradingview.com/chart/WjXriYBc/?symbol=BINANCE:${r.base}USDT','_blank')"><canvas id="chart_${i}"></canvas></div>
     </div>
   `).join('');
 
@@ -550,7 +550,7 @@ function renderTable(res) {
     </tr></thead>
     <tbody>${res.map(r => `<tr${r.hasVolSpike ? ' style="background:#1a1000"' : ''}>
       <td class="${r.bullScore >= 30 ? 'pos' : r.bullScore < 0 ? 'neg' : ''}" style="font-weight:700">${r.bullScore}</td>
-      <td><a href="https://www.tradingview.com/chart/AGxW3D6C/?symbol=BINANCE:${r.base}USDT" target="_blank" style="color:#60a5fa;text-decoration:none"><strong>${r.base}</strong>/USDT</a> ${r.hasVolSpike ? '🔥' : ''}</td>
+      <td><a href="https://www.tradingview.com/chart/WjXriYBc/?symbol=BINANCE:${r.base}USDT" target="_blank" style="color:#60a5fa;text-decoration:none"><strong>${r.base}</strong>/USDT</a> ${r.hasVolSpike ? '🔥' : ''}</td>
       <td class="${r.corr < 0 ? 'neg' : ''}">${r.corr.toFixed(3)}</td>
       <td>$${r.lastPrice < 1 ? r.lastPrice.toPrecision(4) : fmtNum(r.lastPrice)}</td>
       <td class="${r.avg3Return >= 0 ? 'pos' : 'neg'}">${r.avg3Return >= 0 ? '+' : ''}${r.avg3Return.toFixed(1)}%</td>
