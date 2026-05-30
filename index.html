@@ -24,6 +24,8 @@ body { background: #0a0e17; color: #e0e0e0; font-family: 'Segoe UI', sans-serif;
 .summary .stat { background: #141a2a; padding: 10px 16px; border-radius: 8px; border: 1px solid #1e2a40; }
 .summary .stat .val { font-size: 20px; font-weight: 700; color: #fff; }
 .summary .stat .lbl { color: #8892a4; margin-top: 2px; }
+.summary .stat:hover { filter: brightness(1.2); }
+.summary .stat.active { background: #1a2540; filter: brightness(1.3); }
 .coin-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 16px; padding: 20px 30px; }
 .coin-card { background: #111827; border: 1px solid #1e2a40; border-radius: 10px; padding: 16px; }
 .coin-card.highlight { border-color: #f59e0b; }
@@ -427,7 +429,25 @@ async function startScan() {
   btn.textContent = '스캔 시작';
 }
 
+let allScanResults = [];
+let activeFilter = 'all';
+
+function toggleSummaryFilter(f) {
+  activeFilter = (activeFilter === f) ? 'all' : f;
+  if (activeFilter === 'all') renderResults(allScanResults);
+  else if (activeFilter === 'negCorr') renderResults(allScanResults.filter(r => r.corr < 0));
+  else if (activeFilter === 'volSpike') renderResults(allScanResults.filter(r => r.hasVolSpike));
+  // highlight active
+  document.querySelectorAll('#summaryArea .stat').forEach(el => el.classList.remove('active'));
+  if (activeFilter !== 'all') {
+    const idx = activeFilter === 'negCorr' ? 2 : activeFilter === 'volSpike' ? 3 : -1;
+    if (idx >= 0) document.querySelectorAll('#summaryArea .stat')[idx]?.classList.add('active');
+  }
+}
+
 function renderSummary(res, total) {
+  allScanResults = [...res];
+  activeFilter = 'all';
   const area = document.getElementById('summaryArea');
   const negCorr = res.filter(r => r.corr < 0).length;
   const spikeCount = res.filter(r => r.hasVolSpike).length;
@@ -435,8 +455,8 @@ function renderSummary(res, total) {
   area.innerHTML = `
     <div class="stat"><div class="val">${total}</div><div class="lbl">분석 코인</div></div>
     <div class="stat"><div class="val">${res.length}</div><div class="lbl">비상관 코인</div></div>
-    <div class="stat"><div class="val">${negCorr}</div><div class="lbl">역상관 코인</div></div>
-    <div class="stat"><div class="val" style="color:#fb923c">${spikeCount}</div><div class="lbl">🔥 거래량 급등</div></div>
+    <div class="stat" onclick="toggleSummaryFilter('negCorr')" style="cursor:pointer;border-color:#f59e0b"><div class="val">${negCorr}</div><div class="lbl">역상관 코인</div></div>
+    <div class="stat" onclick="toggleSummaryFilter('volSpike')" style="cursor:pointer;border-color:#f97316;box-shadow:0 0 8px rgba(249,115,22,0.3)"><div class="val" style="color:#fb923c">${spikeCount}</div><div class="lbl">🔥 거래량 급등</div></div>
     <div class="stat"><div class="val">${avgCorr}</div><div class="lbl">평균 상관계수</div></div>
   `;
 }
