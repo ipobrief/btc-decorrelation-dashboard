@@ -97,7 +97,7 @@ body { background: #0a0e17; color: #e0e0e0; font-family: 'Segoe UI', sans-serif;
     <label>상관계수 ≤</label>
     <input type="number" id="corrThreshold" value="0.4" min="-1" max="1" step="0.05" style="width:70px">
     <label>최소 거래대금(M$)</label>
-    <input type="number" id="minVolume" value="5" min="0" step="1" style="width:70px">
+    <input type="number" id="minVolume" value="1" min="0" step="1" style="width:70px">
     <label>거래량 급등 ≥</label>
     <input type="number" id="volSpikeThreshold" value="200" min="50" step="50" style="width:70px">
     <label>%</label>
@@ -106,6 +106,9 @@ body { background: #0a0e17; color: #e0e0e0; font-family: 'Segoe UI', sans-serif;
       <button onclick="setView('table')">테이블</button>
     </div>
     <button id="scanBtn" onclick="startScan()">스캔 시작</button>
+    <span style="color:#334155;font-size:18px">|</span>
+    <input type="text" id="searchCoin" placeholder="코인 검색 (예: SOL)" style="width:120px;text-transform:uppercase" onkeydown="if(event.key==='Enter')searchCoin()">
+    <button onclick="searchCoin()">분석</button>
   </div>
 </div>
 <div class="status-bar">
@@ -269,7 +272,7 @@ async function startScan() {
     statusEl.textContent = `${candidates.length}개 후보 코인 분석 중...`;
 
     results = [];
-    const batchSize = 3;
+    const batchSize = 5;
     for (let i = 0; i < candidates.length; i += batchSize) {
       const batch = candidates.slice(i, i + batchSize);
       const promises = batch.map(async (s) => {
@@ -599,6 +602,103 @@ function showScore(idx) {
 function closeScorePopup() {
   document.getElementById('scoreOverlay').style.display = 'none';
   document.getElementById('scorePopup').style.display = 'none';
+}
+
+async function searchCoin() {
+  const input = document.getElementById('searchCoin').value.trim().toUpperCase();
+  if (!input) return;
+  const symbol = input.endsWith('USDT') ? input : input + 'USDT';
+  const base = input.replace('USDT','');
+
+  const statusEl = document.getElementById('statusText');
+  statusEl.textContent = `${base} 분석 중...`;
+
+  try {
+    const period = +document.getElementById('period').value;
+
+    // BTC 데이터
+    const btcKlines = await getKlines('BTCUSDT', '1d', period + 1);
+    const btcReturns = toReturns(btcKlines.map(k => k.close));
+
+    // 코인 데이터
+    const klines = await getKlines(symbol, '1d', period + 1);
+    if (!klines || klines.length < 10) { statusEl.textContent = `❌ ${symbol} 데이터를 찾을 수 없습니다`; return; }
+
+    const returns = toReturns(klines.map(k => k.close));
+    const corr = pearsonCorrelation(btcReturns, returns);
+
+    const lastPrice = klines[klines.length-1].close;
+    const firstPrice = klines[0].close;
+    const chgPct = ((lastPrice - firstPrice) / firstPrice) * 100;
+
+    const vols = klines.map(k => k.volume);
+    const recent3 = vols.slice(-3);
+    const prev10 = vols.slice(-13, -3);
+    const avg3 = recent3.reduce((a,b) => a+b, 0) / recent3.length;
+    const avg10 = prev10.length >= 3 ? prev10.reduce((a,b) => a+b, 0) / prev10.length : 0;
+    const volSpikePct = avg10 > 0 ? ((avg3 - avg10) / avg10) * 100 : 0;
+    const volSpikeThreshold = +document.getElementById('volSpikeThreshold').value;
+    const hasVolSpike = volSpikePct >= volSpikeThreshold;
+
+    const tickers = await fetchJSON(`${BINANCE_API}/ticker/24hr?symbol=${symbol}`);
+    const vol24h = +tickers.quoteVolume || 0;
+    const avgDailyVol = vols.reduce((a,b) => a+b, 0) / vols.length;
+
+    const closes = klines.map(k => k.close);
+    const last3Returns = [];
+    for (let j = closes.length - 3; j < closes.length; j++) {
+      if (j > 0) last3Returns.push((closes[j] - closes[j-1]) / closes[j-1] * 100);
+    }
+    const avg3Return = last3Returns.length ? last3Returns.reduce((a,b) => a+b, 0) / last3Returns.length : 0;
+    const todayReturn = closes.length >= 2 ? (closes[closes.length-1] - closes[closes.length-2]) / closes[closes.length-2] * 100 : 0;
+
+    const calcMA = (arr, p) => arr.length < p ? null : arr.slice(-p).reduce((a,b) => a+b, 0) / p;
+    const ma5 = calcMA(closes, 5), ma10 = calcMA(closes, 10), ma20 = calcMA(closes, 20);
+    const maAligned = (ma5 && ma10 && ma20) && (ma5 > ma10 && ma10 > ma20);
+    const closesYd = closes.slice(0, -1);
+    const ma5y = calcMA(closesYd, 5), ma10y = calcMA(closesYd, 10), ma20y = calcMA(closesYd, 20);
+    const maAlignedYd = (ma5y && ma10y && ma20y) && (ma5y > ma10y && ma10y > ma20y);
+    const maJustAligned = maAligned && !maAlignedYd;
+
+    const [futuresData, whaleData] = await Promise.all([
+      getFuturesData(symbol),
+      getWhaleRatio(symbol, lastPrice)
+    ]);
+    const oiSignal = futuresData.hasFutures ? getOISignal(futuresData.oiChgPct, futuresData.fundingRate, todayReturn) : { label: '', emoji: '', cls: '' };
+
+    const r = {
+      symbol, base, corr: corr || 0, klines,
+      lastPrice, chgPct, vol24h, avgDailyVol,
+      avg3Vol: avg3, avg10Vol: avg10, volSpikePct, hasVolSpike,
+      avg3Return, todayReturn, maAligned, maJustAligned, ma5, ma10, ma20,
+      ...futuresData, oiSignal, ...whaleData
+    };
+
+    // 점수 계산
+    const sd = {};
+    sd.today = r.todayReturn >= 10 ? 15 : r.todayReturn >= 5 ? 12 : r.todayReturn >= 0 ? 5 : r.todayReturn >= -5 ? -3 : -10;
+    sd.avg3 = r.avg3Return >= 10 ? 20 : r.avg3Return >= 5 ? 16 : r.avg3Return >= 2 ? 12 : r.avg3Return >= 0 ? 5 : r.avg3Return >= -3 ? -3 : -10;
+    sd.ma = r.maJustAligned ? 15 : r.maAligned ? 10 : 0;
+    sd.vol = r.volSpikePct >= 200 ? 15 : r.volSpikePct >= 100 ? 10 : r.volSpikePct >= 50 ? 5 : r.volSpikePct < -30 ? -5 : 0;
+    sd.oi = 0;
+    if (r.hasFutures) { sd.oi = r.oiChgPct >= 10 ? 10 : r.oiChgPct >= 5 ? 7 : r.oiChgPct >= 0 ? 3 : -3; }
+    sd.fr = 0;
+    if (r.hasFutures) { const fr = r.fundingRate; sd.fr = (fr > 0 && fr <= 0.001) ? 10 : fr > 0.001 ? -5 : fr < -0.0005 ? 5 : fr < 0 ? 2 : 0; }
+    sd.squeeze = r.oiSignal.cls === 'oi-squeeze' ? 10 : 0;
+    sd.whale = r.whaleRatio >= 50 ? 5 : r.whaleRatio >= 30 ? 3 : r.whaleRatio >= 10 ? 1 : 0;
+    r.scoreDetail = sd;
+    r.bullScore = sd.today + sd.avg3 + sd.ma + sd.vol + sd.oi + sd.fr + sd.squeeze + sd.whale;
+
+    // 검색 결과를 맨 앞에 추가하고 렌더링
+    results = [r, ...results.filter(x => x.symbol !== symbol)];
+    renderResults(results);
+    statusEl.textContent = `✅ ${base} 분석 완료 (점수: ${r.bullScore}, 상관계수: ${(r.corr||0).toFixed(3)})`;
+
+    // 맨 위로 스크롤
+    document.getElementById('cardGrid')?.scrollIntoView({behavior:'smooth'});
+  } catch(e) {
+    statusEl.textContent = `❌ ${symbol} 분석 실패: ${e.message}`;
+  }
 }
 </script>
 </body>
