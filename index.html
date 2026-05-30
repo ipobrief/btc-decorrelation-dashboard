@@ -290,10 +290,10 @@ async function startScan() {
           // 거래량(코인 수량 기준) 급등 분석: 최근 3일 평균 vs 이전 10일 평균
           const vols = klines.map(k => k.volume);
           const recent3 = vols.slice(-3);
-          const prev10 = vols.slice(-13, -3);
+          const prev30 = vols.slice(-33, -3);
           const avg3 = recent3.reduce((a,b) => a+b, 0) / recent3.length;
-          const avg10 = prev10.length >= 3 ? prev10.reduce((a,b) => a+b, 0) / prev10.length : 0;
-          const volSpikePct = avg10 > 0 ? ((avg3 - avg10) / avg10) * 100 : 0;
+          const avg30 = prev30.length >= 5 ? prev30.reduce((a,b) => a+b, 0) / prev30.length : 0;
+          const volSpikePct = avg30 > 0 ? ((avg3 - avg30) / avg30) * 100 : 0;
           const hasVolSpike = volSpikePct >= volSpikeThreshold;
 
           const vol24h = tickerMap[s.symbol] || 0;
@@ -338,7 +338,7 @@ async function startScan() {
           return {
             symbol: s.symbol, base: s.base, corr, klines,
             lastPrice, chgPct, vol24h, avgDailyVol,
-            avg3Vol: avg3, avg10Vol: avg10, volSpikePct, hasVolSpike,
+            avg3Vol: avg3, avg30Vol: avg30, volSpikePct, hasVolSpike,
             avg3Return, todayReturn, maAligned, maJustAligned, ma5, ma10, ma20,
             ...futuresData, oiSignal, ...whaleData
           };
@@ -464,7 +464,7 @@ function renderCards(res) {
         <div class="coin-name">${r.base}<small>/USDT</small> <span class="score-btn" onclick="event.stopPropagation();showScore(${i})" style="font-size:12px; padding:2px 6px; border-radius:4px; font-weight:700; background:${r.bullScore >= 50 ? '#166534' : r.bullScore >= 30 ? '#14532d' : r.bullScore >= 10 ? '#1e3a1e' : r.bullScore >= 0 ? '#1e293b' : '#451a1a'}; color:${r.bullScore >= 30 ? '#4ade80' : r.bullScore >= 10 ? '#86efac' : r.bullScore >= 0 ? '#94a3b8' : '#f87171'}">${r.bullScore}점</span></div>
         <div class="coin-badges">
           <span class="badge corr">ρ = ${r.corr.toFixed(3)}<span class="tip">BTC와의 상관계수 (${Math.abs(r.corr) < 0.1 ? '거의 무관' : Math.abs(r.corr) < 0.3 ? '약한 상관' : '보통 상관'})</span></span>
-          ${r.hasVolSpike ? `<span class="badge vol-spike">🔥 거래량 +${r.volSpikePct.toFixed(0)}%<span class="tip">3일 평균 거래량이 10일 평균 대비 ${r.volSpikePct.toFixed(0)}% 급등</span></span>` : `<span class="badge ${r.volSpikePct >= 0 ? 'vol-up' : 'vol-down'}">거래량 ${r.volSpikePct >= 0 ? '+' : ''}${r.volSpikePct.toFixed(0)}%<span class="tip">3일 평균 거래량 vs 10일 평균 변화율</span></span>`}
+          ${r.hasVolSpike ? `<span class="badge vol-spike">🔥 거래량 +${r.volSpikePct.toFixed(0)}%<span class="tip">3일 평균 거래량이 30일 평균 대비 ${r.volSpikePct.toFixed(0)}% 급등</span></span>` : `<span class="badge ${r.volSpikePct >= 0 ? 'vol-up' : 'vol-down'}">거래량 ${r.volSpikePct >= 0 ? '+' : ''}${r.volSpikePct.toFixed(0)}%<span class="tip">3일 평균 거래량 vs 30일 평균 변화율</span></span>`}
           <span class="badge ${r.todayReturn >= 0 ? 'vol-up' : 'vol-down'}">오늘 ${r.todayReturn >= 0 ? '+' : ''}${r.todayReturn.toFixed(1)}%<span class="tip">오늘 하루 수익률 (전일 종가 대비)</span></span>
           ${r.maJustAligned ? '<span class="badge ma-just">🚀 정배열 전환<span class="tip">5일 > 10일 > 20일 이평선 정배열로 오늘 전환됨</span></span>' : r.maAligned ? '<span class="badge ma-aligned">📈 정배열<span class="tip">5일 > 10일 > 20일 이평선 정배열 유지 중</span></span>' : ''}
           ${r.oiSignal.label ? `<span class="badge ${r.oiSignal.cls}">${r.oiSignal.emoji} ${r.oiSignal.label}<span class="tip">${r.oiSignal.cls === 'oi-squeeze' ? 'OI 증가 + 숏 과밀집 → 급등 시 숏 연쇄청산 가능' : r.oiSignal.cls === 'oi-overheat' ? 'OI 증가 + 롱 과밀집 → 하락 시 롱 연쇄청산 위험' : r.oiSignal.cls === 'oi-bull' ? 'OI 증가 + 롱 우세 → 건강한 상승 추세' : r.oiSignal.cls === 'oi-bear' ? 'OI 증가 + 숏 우세 → 하락 추세' : 'OI 감소 → 포지션 정리 중, 관망세'}</span></span>` : ''}
@@ -475,7 +475,7 @@ function renderCards(res) {
         <span>가격 <span class="v">$${r.lastPrice < 1 ? r.lastPrice.toPrecision(4) : fmtNum(r.lastPrice)}</span></span>
         <span>3일 평균 손익 <span class="v" style="color:${r.avg3Return >= 0 ? '#4ade80' : '#f87171'}; background:${r.avg3Return >= 0 ? 'rgba(74,222,128,0.15)' : 'rgba(248,113,113,0.15)'}; padding:1px 5px; border-radius:3px">${r.avg3Return >= 0 ? '▲' : '▼'} ${r.avg3Return >= 0 ? '+' : ''}${r.avg3Return.toFixed(1)}%</span></span>
         <span>3일 평균 거래량 <span class="v">${fmtNum(r.avg3Vol)}</span></span>
-        <span>10일 평균 거래량 <span class="v">${fmtNum(r.avg10Vol)}</span></span>
+        <span>30일 평균 거래량 <span class="v">${fmtNum(r.avg30Vol)}</span></span>
       </div>
       <div class="coin-extra">
         ${r.hasFutures ? `
@@ -539,7 +539,7 @@ function renderTable(res) {
       <th onclick="sortTable('avg3Return')">3일 평균 손익</th>
       <th onclick="sortTable('todayReturn')">오늘 수익률</th>
       <th onclick="sortTable('avg3Vol')">3일 평균 거래량</th>
-      <th onclick="sortTable('avg10Vol')">10일 평균 거래량</th>
+      <th onclick="sortTable('avg30Vol')">30일 평균 거래량</th>
       <th onclick="sortTable('volSpikePct')">급등률</th>
       <th onclick="sortTable('maAligned')">이평 정배열</th>
       <th onclick="sortTable('oiChgPct')">OI(24h)</th>
@@ -554,7 +554,7 @@ function renderTable(res) {
       <td class="${r.avg3Return >= 0 ? 'pos' : 'neg'}">${r.avg3Return >= 0 ? '+' : ''}${r.avg3Return.toFixed(1)}%</td>
       <td class="${r.todayReturn >= 0 ? 'pos' : 'neg'}">${r.todayReturn >= 0 ? '+' : ''}${r.todayReturn.toFixed(1)}%</td>
       <td>${fmtNum(r.avg3Vol)}</td>
-      <td>${fmtNum(r.avg10Vol)}</td>
+      <td>${fmtNum(r.avg30Vol)}</td>
       <td class="${r.volSpikePct >= 200 ? 'pos' : r.volSpikePct >= 0 ? '' : 'neg'}" style="${r.hasVolSpike ? 'font-weight:700' : ''}">${r.volSpikePct >= 0 ? '+' : ''}${r.volSpikePct.toFixed(0)}%</td>
       <td class="${r.maAligned ? 'pos' : ''}">${r.maJustAligned ? '🚀 전환' : r.maAligned ? '📈 정배열' : '-'}</td>
       <td class="${r.oiChgPct >= 0 ? 'pos' : 'neg'}">${r.hasFutures ? (r.oiChgPct >= 0 ? '▲+' : '▼') + r.oiChgPct.toFixed(1) + '%' : '-'}</td>
@@ -633,10 +633,10 @@ async function searchCoin() {
 
     const vols = klines.map(k => k.volume);
     const recent3 = vols.slice(-3);
-    const prev10 = vols.slice(-13, -3);
+    const prev30 = vols.slice(-33, -3);
     const avg3 = recent3.reduce((a,b) => a+b, 0) / recent3.length;
-    const avg10 = prev10.length >= 3 ? prev10.reduce((a,b) => a+b, 0) / prev10.length : 0;
-    const volSpikePct = avg10 > 0 ? ((avg3 - avg10) / avg10) * 100 : 0;
+    const avg30 = prev30.length >= 5 ? prev30.reduce((a,b) => a+b, 0) / prev30.length : 0;
+    const volSpikePct = avg30 > 0 ? ((avg3 - avg30) / avg30) * 100 : 0;
     const volSpikeThreshold = +document.getElementById('volSpikeThreshold').value;
     const hasVolSpike = volSpikePct >= volSpikeThreshold;
 
@@ -669,7 +669,7 @@ async function searchCoin() {
     const r = {
       symbol, base, corr: corr || 0, klines,
       lastPrice, chgPct, vol24h, avgDailyVol,
-      avg3Vol: avg3, avg10Vol: avg10, volSpikePct, hasVolSpike,
+      avg3Vol: avg3, avg30Vol: avg30, volSpikePct, hasVolSpike,
       avg3Return, todayReturn, maAligned, maJustAligned, ma5, ma10, ma20,
       ...futuresData, oiSignal, ...whaleData
     };
