@@ -131,24 +131,34 @@ let results = [];
 let volPeriodLabel = '30일';
 let chartInstances = {};
 let altSeasonData = null;
-let watchlist = JSON.parse(localStorage.getItem('btc_watchlist') || '[]');
+// watchlist: [{symbol, date, price}] — 기존 문자열 배열 마이그레이션
+let watchlist = (JSON.parse(localStorage.getItem('btc_watchlist') || '[]')).map(w =>
+  typeof w === 'string' ? { symbol: w, date: null, price: null } : w
+);
 
-function toggleWatch(symbol, ev) {
+function isWatched(symbol) { return watchlist.some(w => w.symbol === symbol); }
+function getWatch(symbol) { return watchlist.find(w => w.symbol === symbol); }
+
+function toggleWatch(symbol, price, ev) {
   if (ev) ev.stopPropagation();
-  const idx = watchlist.indexOf(symbol);
+  const idx = watchlist.findIndex(w => w.symbol === symbol);
   if (idx >= 0) watchlist.splice(idx, 1);
-  else watchlist.push(symbol);
+  else {
+    const now = new Date();
+    const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+    watchlist.push({ symbol, date: dateStr, price });
+  }
   localStorage.setItem('btc_watchlist', JSON.stringify(watchlist));
 
   // 관심종목 필터 보는 중이면 다시 필터링, 아니면 현재 화면 별표만 갱신
   if (activeFilter === 'watch') {
-    renderResults(allScanResults.filter(r => watchlist.includes(r.symbol)));
+    renderResults(allScanResults.filter(r => isWatched(r.symbol)));
   } else {
     renderResults(lastRendered);
   }
   // 관심종목 카운트 갱신
   const cntEl = document.getElementById('watchCount');
-  if (cntEl) cntEl.textContent = allScanResults.filter(r => watchlist.includes(r.symbol)).length;
+  if (cntEl) cntEl.textContent = allScanResults.filter(r => isWatched(r.symbol)).length;
 }
 
 // 알트장 신호 분석 (CoinGecko 무료 API)
@@ -583,7 +593,7 @@ let lastScanTotal = 0;
 function toggleSummaryFilter(f) {
   activeFilter = (activeFilter === f) ? 'all' : f;
   if (activeFilter === 'all') renderResults(allScanResults);
-  else if (activeFilter === 'watch') renderResults(allScanResults.filter(r => watchlist.includes(r.symbol)));
+  else if (activeFilter === 'watch') renderResults(allScanResults.filter(r => isWatched(r.symbol)));
   else if (activeFilter === 'negCorr') renderResults(allScanResults.filter(r => r.corr < 0));
   else if (activeFilter === 'volSpike') renderResults(allScanResults.filter(r => r.hasVolSpike));
   else if (activeFilter === 'strongBuy') {
@@ -629,7 +639,7 @@ function renderSummary(res, total) {
     <div class="stat" onclick="toggleSummaryFilter('strongShort')" style="cursor:pointer;border-color:#ef4444;box-shadow:0 0 8px rgba(239,68,68,0.3)"><div class="val" style="color:#f87171">${res.filter(r => r.strongShort).length}</div><div class="lbl">📉 강한 숏</div></div>
     <div class="stat"><div class="val">${avgCorr}</div><div class="lbl">평균 상관계수</div></div>
     <div class="stat" onclick="showAltSeason()" style="cursor:pointer;border-color:#a78bfa;box-shadow:0 0 8px rgba(167,139,250,0.3)"><div class="val" style="color:${altSeasonData?(altSeasonData.verdictCls==='alt-on'?'#4ade80':altSeasonData.verdictCls==='alt-good'?'#86efac':altSeasonData.verdictCls==='alt-neutral'?'#fbbf24':'#f87171'):'#a78bfa'};font-size:15px;white-space:nowrap">${altSeasonData?altSeasonData.verdict:'로딩...'}</div><div class="lbl">📊 알트장 신호 (클릭)</div></div>
-    <div class="stat" onclick="toggleSummaryFilter('watch')" style="cursor:pointer;border-color:#fbbf24;box-shadow:0 0 8px rgba(251,191,36,0.3)"><div class="val" style="color:#fbbf24"><span id="watchCount">${res.filter(r => watchlist.includes(r.symbol)).length}</span></div><div class="lbl">⭐ 관심종목</div></div>
+    <div class="stat" onclick="toggleSummaryFilter('watch')" style="cursor:pointer;border-color:#fbbf24;box-shadow:0 0 8px rgba(251,191,36,0.3)"><div class="val" style="color:#fbbf24"><span id="watchCount">${res.filter(r => isWatched(r.symbol)).length}</span></div><div class="lbl">⭐ 관심종목</div></div>
   `;
 }
 
@@ -657,7 +667,7 @@ function renderCards(res) {
   grid.innerHTML = res.map((r, i) => `
     <div class="coin-card${r.corr < 0 ? ' highlight' : ''}${r.hasVolSpike ? ' vol-spike' : ''}">
       <div class="coin-header">
-        <div class="coin-name"><span onclick="toggleWatch('${r.symbol}', event)" style="cursor:pointer;font-size:17px;margin-right:5px;color:${watchlist.includes(r.symbol) ? '#fbbf24' : '#475569'};vertical-align:middle" title="관심종목">${watchlist.includes(r.symbol) ? '★' : '☆'}</span>${r.base}<small>/USDT</small> <span class="score-btn" onclick="event.stopPropagation();showScore(${i})" style="font-size:12px; padding:2px 6px; border-radius:4px; font-weight:700; background:${r.bullScore >= 50 ? '#166534' : r.bullScore >= 30 ? '#14532d' : r.bullScore >= 10 ? '#1e3a1e' : r.bullScore >= 0 ? '#1e293b' : '#451a1a'}; color:${r.bullScore >= 30 ? '#4ade80' : r.bullScore >= 10 ? '#86efac' : r.bullScore >= 0 ? '#94a3b8' : '#f87171'}">${r.bullScore}점</span></div>
+        <div class="coin-name"><span onclick="toggleWatch('${r.symbol}', ${r.lastPrice}, event)" style="cursor:pointer;font-size:17px;margin-right:5px;color:${isWatched(r.symbol) ? '#fbbf24' : '#475569'};vertical-align:middle" title="관심종목">${isWatched(r.symbol) ? '★' : '☆'}</span>${r.base}<small>/USDT</small> <span class="score-btn" onclick="event.stopPropagation();showScore(${i})" style="font-size:12px; padding:2px 6px; border-radius:4px; font-weight:700; background:${r.bullScore >= 50 ? '#166534' : r.bullScore >= 30 ? '#14532d' : r.bullScore >= 10 ? '#1e3a1e' : r.bullScore >= 0 ? '#1e293b' : '#451a1a'}; color:${r.bullScore >= 30 ? '#4ade80' : r.bullScore >= 10 ? '#86efac' : r.bullScore >= 0 ? '#94a3b8' : '#f87171'}">${r.bullScore}점</span>${(() => { const w = getWatch(r.symbol); if (!w || !w.date || !w.price) return ''; const ret = (r.lastPrice - w.price) / w.price * 100; return `<span style="font-size:11px;margin-left:8px;color:#8892a4">⭐${w.date.slice(5)} 등록 · <b style="color:${ret>=0?'#4ade80':'#f87171'}">${ret>=0?'+':''}${ret.toFixed(1)}%</b></span>`; })()}</div>
         <div class="coin-badges">
           ${r.strongBuy ? `<span class="badge ma-just">💪 강한 매수<span class="tip">OI 증가 + 펀딩비 양수 = 롱 진입 활발${r.todayReturn >= 0 ? ' (양봉 동반)' : ' (음봉 — 저점 매집 가능)'}</span></span>` : ''}
           ${r.strongShort ? `<span class="badge" style="background:#7f1d1d;color:#fca5a5;animation:pulse 1.5s infinite">📉 강한 숏<span class="tip">OI 증가 + 펀딩비 숏우세 = 숏 진입 활발${r.todayReturn < 0 ? ' (음봉 동반)' : ' (양봉 — 숏스퀴즈 주의)'}</span></span>` : ''}
