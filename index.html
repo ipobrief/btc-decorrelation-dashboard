@@ -327,6 +327,19 @@ async function getWhaleRatio(symbol, lastPrice) {
   }
 }
 
+// 펀딩비 상태 라벨 (8시간당 기준)
+function getFundingLabel(fr) {
+  const pct = fr * 100; // % 단위
+  if (pct >= 0.1) return { txt: '심한 과열', color: '#f87171' };
+  if (pct >= 0.05) return { txt: '과열', color: '#fb923c' };
+  if (pct >= 0.03) return { txt: '약과열', color: '#fbbf24' };
+  if (pct > 0.012) return { txt: '롱 우세', color: '#86efac' };
+  if (pct >= 0.008) return { txt: '중립', color: '#94a3b8' };
+  if (pct >= 0) return { txt: '롱 약세', color: '#94a3b8' };
+  if (pct >= -0.03) return { txt: '숏 우세', color: '#60a5fa' };
+  return { txt: '숏 과열', color: '#a78bfa' };
+}
+
 // OI + 펀딩비 시그널 판정
 function getOISignal(oiChgPct, fundingRate, todayReturn) {
   if (oiChgPct <= -5) return { label: '포지션 정리', emoji: '😐', cls: 'oi-neutral' };
@@ -621,7 +634,7 @@ function renderCards(res) {
       <div class="coin-extra">
         ${r.hasFutures ? `
           <span class="tag">OI(24h) <span class="v" style="color:${r.oiChgPct >= 0 ? '#4ade80' : '#f87171'}; background:${r.oiChgPct >= 0 ? 'rgba(74,222,128,0.15)' : 'rgba(248,113,113,0.15)'}; padding:1px 5px; border-radius:3px">${r.oiChgPct >= 0 ? '▲' : '▼'} ${r.oiChgPct >= 0 ? '+' : ''}${r.oiChgPct.toFixed(1)}%</span></span>
-          <span class="tag">펀딩비 <span class="v" style="color:${r.fundingRate >= 0 ? '#4ade80' : '#f87171'}; background:${r.fundingRate >= 0 ? 'rgba(74,222,128,0.15)' : 'rgba(248,113,113,0.15)'}; padding:1px 5px; border-radius:3px">${r.fundingRate >= 0 ? '▲' : '▼'} ${(r.fundingRate * 100).toFixed(4)}%</span></span>
+          <span class="tag">펀딩비 <span class="v" style="color:${r.fundingRate >= 0 ? '#4ade80' : '#f87171'}; background:${r.fundingRate >= 0 ? 'rgba(74,222,128,0.15)' : 'rgba(248,113,113,0.15)'}; padding:1px 5px; border-radius:3px">${r.fundingRate >= 0 ? '▲' : '▼'} ${(r.fundingRate * 100).toFixed(4)}%</span> <span style="color:${getFundingLabel(r.fundingRate).color};font-size:10px;font-weight:700">${getFundingLabel(r.fundingRate).txt}</span></span>
         ` : '<span class="tag">선물 <span class="v">없음</span></span>'}
         <span class="tag">대형주문($1K+) <span class="v">${r.whaleRatio.toFixed(1)}% (${r.whaleCount}건)</span></span>
         ${r.whaleCount > 0 ? `<span class="tag" style="min-width:80px">매수/매도<div class="whale-bar"><div class="buy" style="width:${r.whaleBuyVol + r.whaleSellVol > 0 ? (r.whaleBuyVol / (r.whaleBuyVol + r.whaleSellVol) * 100).toFixed(0) : 50}%"></div><div class="sell" style="width:${r.whaleBuyVol + r.whaleSellVol > 0 ? (r.whaleSellVol / (r.whaleBuyVol + r.whaleSellVol) * 100).toFixed(0) : 50}%"></div></div></span>` : ''}
