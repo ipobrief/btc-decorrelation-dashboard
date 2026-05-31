@@ -536,6 +536,8 @@ async function startScan() {
 
       // 강한 매수 우세 판정: OI 증가 + 펀딩비 양수 + 오늘 양봉
       r.strongBuy = r.hasFutures && r.oiChgPct >= 5 && r.fundingRate > 0 && r.todayReturn > 0;
+      // 강한 숏 판정: OI 증가 + 펀딩비 숏우세(음수) (가격 무관, 음봉이면 더 강함)
+      r.strongShort = r.hasFutures && r.oiChgPct >= 5 && r.fundingRate < 0;
     });
 
     // 강한 매수 우세 → 숏스퀴즈 → 점수순 정렬
@@ -565,10 +567,19 @@ function toggleSummaryFilter(f) {
   else if (activeFilter === 'negCorr') renderResults(allScanResults.filter(r => r.corr < 0));
   else if (activeFilter === 'volSpike') renderResults(allScanResults.filter(r => r.hasVolSpike));
   else if (activeFilter === 'strongBuy') renderResults(allScanResults.filter(r => r.strongBuy));
+  else if (activeFilter === 'strongShort') {
+    // 강한 숏: 거래량 급등% → OI → 펀딩비(가장 음수) 순 정렬
+    const shorts = allScanResults.filter(r => r.strongShort).sort((a,b) => {
+      if (b.volSpikePct !== a.volSpikePct) return b.volSpikePct - a.volSpikePct;
+      if (b.oiChgPct !== a.oiChgPct) return b.oiChgPct - a.oiChgPct;
+      return a.fundingRate - b.fundingRate;
+    });
+    renderResults(shorts);
+  }
   // highlight active
   document.querySelectorAll('#summaryArea .stat').forEach(el => el.classList.remove('active'));
   if (activeFilter !== 'all') {
-    const idx = activeFilter === 'negCorr' ? 2 : activeFilter === 'volSpike' ? 3 : activeFilter === 'strongBuy' ? 4 : -1;
+    const idx = activeFilter === 'negCorr' ? 2 : activeFilter === 'volSpike' ? 3 : activeFilter === 'strongBuy' ? 4 : activeFilter === 'strongShort' ? 5 : -1;
     if (idx >= 0) document.querySelectorAll('#summaryArea .stat')[idx]?.classList.add('active');
   }
 }
@@ -587,6 +598,7 @@ function renderSummary(res, total) {
     <div class="stat" onclick="toggleSummaryFilter('negCorr')" style="cursor:pointer;border-color:#f59e0b"><div class="val">${negCorr}</div><div class="lbl">역상관 코인</div></div>
     <div class="stat" onclick="toggleSummaryFilter('volSpike')" style="cursor:pointer;border-color:#f97316;box-shadow:0 0 8px rgba(249,115,22,0.3)"><div class="val" style="color:#fb923c">${spikeCount}</div><div class="lbl">🔥 거래량 급등</div></div>
     <div class="stat" onclick="toggleSummaryFilter('strongBuy')" style="cursor:pointer;border-color:#4ade80;box-shadow:0 0 8px rgba(74,222,128,0.3)"><div class="val" style="color:#4ade80">${res.filter(r => r.strongBuy).length}</div><div class="lbl">💪 강한 매수</div></div>
+    <div class="stat" onclick="toggleSummaryFilter('strongShort')" style="cursor:pointer;border-color:#ef4444;box-shadow:0 0 8px rgba(239,68,68,0.3)"><div class="val" style="color:#f87171">${res.filter(r => r.strongShort).length}</div><div class="lbl">📉 강한 숏</div></div>
     <div class="stat"><div class="val">${avgCorr}</div><div class="lbl">평균 상관계수</div></div>
     <div class="stat" onclick="showAltSeason()" style="cursor:pointer;border-color:#a78bfa;box-shadow:0 0 8px rgba(167,139,250,0.3)"><div class="val" style="color:${altSeasonData?(altSeasonData.verdictCls==='alt-on'?'#4ade80':altSeasonData.verdictCls==='alt-good'?'#86efac':altSeasonData.verdictCls==='alt-neutral'?'#fbbf24':'#f87171'):'#a78bfa'};font-size:15px;white-space:nowrap">${altSeasonData?altSeasonData.verdict:'로딩...'}</div><div class="lbl">📊 알트장 신호 (클릭)</div></div>
   `;
@@ -617,6 +629,7 @@ function renderCards(res) {
         <div class="coin-name">${r.base}<small>/USDT</small> <span class="score-btn" onclick="event.stopPropagation();showScore(${i})" style="font-size:12px; padding:2px 6px; border-radius:4px; font-weight:700; background:${r.bullScore >= 50 ? '#166534' : r.bullScore >= 30 ? '#14532d' : r.bullScore >= 10 ? '#1e3a1e' : r.bullScore >= 0 ? '#1e293b' : '#451a1a'}; color:${r.bullScore >= 30 ? '#4ade80' : r.bullScore >= 10 ? '#86efac' : r.bullScore >= 0 ? '#94a3b8' : '#f87171'}">${r.bullScore}점</span></div>
         <div class="coin-badges">
           ${r.strongBuy ? '<span class="badge ma-just">💪 강한 매수<span class="tip">OI 증가 + 펀딩비 양수 + 오늘 양봉 = 롱 진입 활발</span></span>' : ''}
+          ${r.strongShort ? `<span class="badge" style="background:#7f1d1d;color:#fca5a5;animation:pulse 1.5s infinite">📉 강한 숏<span class="tip">OI 증가 + 펀딩비 숏우세 = 숏 진입 활발${r.todayReturn < 0 ? ' (음봉 동반)' : ' (양봉 — 숏스퀴즈 주의)'}</span></span>` : ''}
           <span class="badge corr">ρ = ${r.corr.toFixed(3)}<span class="tip">BTC와의 상관계수 (${Math.abs(r.corr) < 0.1 ? '거의 무관' : (Math.abs(r.corr) < 0.3 ? '약한 ' : Math.abs(r.corr) < 0.5 ? '보통 ' : Math.abs(r.corr) < 0.7 ? '강한 ' : '매우 강한 ') + (r.corr < 0 ? '역상관' : '상관')})</span></span>
           ${r.hasVolSpike ? `<span class="badge vol-spike">🔥 거래량 +${r.volSpikePct.toFixed(0)}%<span class="tip">3일 평균 거래량이 ${volPeriodLabel} 평균 대비 ${r.volSpikePct.toFixed(0)}% 급등</span></span>` : `<span class="badge ${r.volSpikePct >= 0 ? 'vol-up' : 'vol-down'}">거래량 ${r.volSpikePct >= 0 ? '+' : ''}${r.volSpikePct.toFixed(0)}%<span class="tip">3일 평균 거래량 vs ${volPeriodLabel} 평균 변화율</span></span>`}
           <span class="badge ${r.todayReturn >= 0 ? 'vol-up' : 'vol-down'}">오늘 ${r.todayReturn >= 0 ? '+' : ''}${r.todayReturn.toFixed(1)}%<span class="tip">오늘 하루 수익률 (전일 종가 대비)</span></span>
@@ -844,6 +857,7 @@ async function searchCoin() {
     r.scoreDetail = sd;
     r.bullScore = sd.today + sd.avg3 + sd.ma + sd.vol + sd.oi + sd.fr + sd.squeeze + sd.whale;
     r.strongBuy = r.hasFutures && r.oiChgPct >= 5 && r.fundingRate > 0 && r.todayReturn > 0;
+    r.strongShort = r.hasFutures && r.oiChgPct >= 5 && r.fundingRate < 0;
 
     // 검색 결과를 맨 앞에 추가하고 렌더링
     results = [r, ...results.filter(x => x.symbol !== symbol)];
