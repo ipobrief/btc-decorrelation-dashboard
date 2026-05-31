@@ -130,6 +130,110 @@ let currentView = 'card';
 let results = [];
 let volPeriodLabel = '30일';
 let chartInstances = {};
+let altSeasonData = null;
+
+// 알트장 신호 분석 (CoinGecko 무료 API)
+async function fetchAltSeasonSignal() {
+  try {
+    const [global, markets] = await Promise.all([
+      fetchJSON('https://api.coingecko.com/api/v3/global'),
+      fetchJSON('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=bitcoin,ethereum,tether')
+    ]);
+
+    const totalNow = global.data.total_market_cap.usd;
+    const btc = markets.find(m => m.id === 'bitcoin');
+    const eth = markets.find(m => m.id === 'ethereum');
+    const usdt = markets.find(m => m.id === 'tether');
+
+    const btcMcap = btc.market_cap, ethMcap = eth.market_cap, usdtMcap = usdt.market_cap;
+    const btcChg = btc.market_cap_change_percentage_24h || 0;
+    const ethChg = eth.market_cap_change_percentage_24h || 0;
+    const usdtChg = usdt.market_cap_change_percentage_24h || 0;
+    const totalChg = global.data.market_cap_change_percentage_24h_usd || 0;
+
+    // 24시간 전 시총 역산
+    const totalPrev = totalNow / (1 + totalChg/100);
+    const btcPrev = btcMcap / (1 + btcChg/100);
+    const ethPrev = ethMcap / (1 + ethChg/100);
+    const usdtPrev = usdtMcap / (1 + usdtChg/100);
+
+    // 도미넌스 (현재 vs 24h 전)
+    const btcD_now = btcMcap / totalNow * 100;
+    const btcD_prev = btcPrev / totalPrev * 100;
+    const usdtD_now = usdtMcap / totalNow * 100;
+    const usdtD_prev = usdtPrev / totalPrev * 100;
+
+    // TOTAL3 (BTC, ETH 제외 알트 시총)
+    const total3_now = totalNow - btcMcap - ethMcap;
+    const total3_prev = totalPrev - btcPrev - ethPrev;
+    const total3Chg = (total3_now - total3_prev) / total3_prev * 100;
+
+    const btcDChg = btcD_now - btcD_prev;
+    const usdtDChg = usdtD_now - usdtD_prev;
+
+    // 신호 판정
+    const usdtDown = usdtDChg < 0;   // 현금이 코인으로
+    const total3Up = total3Chg > 0;  // 알트로 유입
+    const btcDDown = btcDChg < 0;    // 비트→알트 순환
+
+    const bullCount = (usdtDown?1:0) + (total3Up?1:0) + (btcDDown?1:0);
+    let verdict, verdictCls;
+    if (bullCount === 3) { verdict = '🔥 알트장 ON'; verdictCls = 'alt-on'; }
+    else if (bullCount === 2) { verdict = '🟢 알트 우호적'; verdictCls = 'alt-good'; }
+    else if (bullCount === 1) { verdict = '🟡 중립'; verdictCls = 'alt-neutral'; }
+    else { verdict = '🔴 알트장 OFF'; verdictCls = 'alt-off'; }
+
+    altSeasonData = {
+      btcD_now, btcDChg, usdtD_now, usdtDChg, total3Chg,
+      total3_now, usdtDown, total3Up, btcDDown,
+      bullCount, verdict, verdictCls
+    };
+    // summary 영역의 알트장 버튼 갱신
+    if (allScanResults.length) renderSummary(allScanResults, lastScanTotal);
+    return altSeasonData;
+  } catch(e) {
+    altSeasonData = null;
+    return null;
+  }
+}
+
+function showAltSeason() {
+  if (!altSeasonData) { alert('알트장 데이터를 불러오는 중입니다. 잠시 후 다시 시도하세요.'); return; }
+  const a = altSeasonData;
+  const arrow = (v) => v < 0 ? '▼' : '▲';
+  const col = (good) => good ? '#4ade80' : '#f87171';
+  document.getElementById('scoreContent').innerHTML = `
+    <span class="close" onclick="closeScorePopup()">✕</span>
+    <div class="title">📊 알트장 신호 분석</div>
+    <div style="font-size:22px;font-weight:800;margin-bottom:6px;color:${a.verdictCls==='alt-on'?'#4ade80':a.verdictCls==='alt-good'?'#86efac':a.verdictCls==='alt-neutral'?'#fbbf24':'#f87171'}">${a.verdict}</div>
+    <div style="font-size:12px;color:#8892a4;margin-bottom:14px">3개 지표 중 ${a.bullCount}개 충족</div>
+    <table>
+      <tr><th>지표</th><th style="text-align:right">변화(24h)</th><th style="text-align:right">신호</th></tr>
+      <tr>
+        <td>USDT.D<br><span style="font-size:11px;color:#8892a4">테더 도미넌스</span></td>
+        <td style="text-align:right;color:${col(a.usdtDown)}">${arrow(a.usdtDChg)} ${Math.abs(a.usdtDChg).toFixed(3)}%p<br><span style="font-size:11px;color:#8892a4">현재 ${a.usdtD_now.toFixed(2)}%</span></td>
+        <td style="text-align:right">${a.usdtDown ? '✅ 현금→코인 유입' : '❌ 현금 대기'}</td>
+      </tr>
+      <tr>
+        <td>BTC.D<br><span style="font-size:11px;color:#8892a4">비트 도미넌스</span></td>
+        <td style="text-align:right;color:${col(a.btcDDown)}">${arrow(a.btcDChg)} ${Math.abs(a.btcDChg).toFixed(3)}%p<br><span style="font-size:11px;color:#8892a4">현재 ${a.btcD_now.toFixed(2)}%</span></td>
+        <td style="text-align:right">${a.btcDDown ? '✅ 비트→알트 순환' : '❌ 비트 강세'}</td>
+      </tr>
+      <tr>
+        <td>TOTAL3<br><span style="font-size:11px;color:#8892a4">알트 시총(BTC·ETH 제외)</span></td>
+        <td style="text-align:right;color:${col(a.total3Up)}">${a.total3Chg >= 0 ? '▲' : '▼'} ${Math.abs(a.total3Chg).toFixed(2)}%<br><span style="font-size:11px;color:#8892a4">$${fmtNum(a.total3_now)}</span></td>
+        <td style="text-align:right">${a.total3Up ? '✅ 알트로 유입' : '❌ 알트 유출'}</td>
+      </tr>
+    </table>
+    <div style="font-size:11px;color:#64748b;margin-top:12px;line-height:1.5">
+      • USDT.D ↓ = 현금이 코인시장으로 유입<br>
+      • BTC.D ↓ = 비트에서 알트로 순환<br>
+      • TOTAL3 ↑ = 알트로 자금 유입<br>
+      <span style="color:#475569">데이터: CoinGecko · 24시간 도미넌스 변화 기준</span>
+    </div>`;
+  document.getElementById('scoreOverlay').style.display = 'block';
+  document.getElementById('scorePopup').style.display = 'block';
+}
 
 function setView(v) {
   currentView = v;
@@ -250,6 +354,7 @@ async function startScan() {
   const btn = document.getElementById('scanBtn');
   btn.disabled = true;
   btn.textContent = '스캔 중...';
+  fetchAltSeasonSignal(); // 알트장 신호 백그라운드 로딩
   const statusEl = document.getElementById('statusText');
   const progressEl = document.getElementById('progressBar');
   const period = +document.getElementById('period').value;
@@ -439,6 +544,7 @@ async function startScan() {
 
 let allScanResults = [];
 let activeFilter = 'all';
+let lastScanTotal = 0;
 
 function toggleSummaryFilter(f) {
   activeFilter = (activeFilter === f) ? 'all' : f;
@@ -456,6 +562,7 @@ function toggleSummaryFilter(f) {
 
 function renderSummary(res, total) {
   allScanResults = [...res];
+  lastScanTotal = total;
   activeFilter = 'all';
   const area = document.getElementById('summaryArea');
   const negCorr = res.filter(r => r.corr < 0).length;
@@ -468,6 +575,7 @@ function renderSummary(res, total) {
     <div class="stat" onclick="toggleSummaryFilter('volSpike')" style="cursor:pointer;border-color:#f97316;box-shadow:0 0 8px rgba(249,115,22,0.3)"><div class="val" style="color:#fb923c">${spikeCount}</div><div class="lbl">🔥 거래량 급등</div></div>
     <div class="stat" onclick="toggleSummaryFilter('strongBuy')" style="cursor:pointer;border-color:#4ade80;box-shadow:0 0 8px rgba(74,222,128,0.3)"><div class="val" style="color:#4ade80">${res.filter(r => r.strongBuy).length}</div><div class="lbl">💪 강한 매수</div></div>
     <div class="stat"><div class="val">${avgCorr}</div><div class="lbl">평균 상관계수</div></div>
+    <div class="stat" onclick="showAltSeason()" style="cursor:pointer;border-color:#a78bfa;box-shadow:0 0 8px rgba(167,139,250,0.3)"><div class="val" style="color:${altSeasonData?(altSeasonData.verdictCls==='alt-on'?'#4ade80':altSeasonData.verdictCls==='alt-good'?'#86efac':altSeasonData.verdictCls==='alt-neutral'?'#fbbf24':'#f87171'):'#a78bfa'};font-size:15px;white-space:nowrap">${altSeasonData?altSeasonData.verdict:'로딩...'}</div><div class="lbl">📊 알트장 신호 (클릭)</div></div>
   `;
 }
 
