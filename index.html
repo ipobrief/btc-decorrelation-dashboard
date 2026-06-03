@@ -165,7 +165,7 @@ async function loadCoinPlatforms() {
     const sym = (c.symbol || '').toUpperCase();
     if (!sym || !c.platforms) continue;
     const cnt = Object.values(c.platforms).filter(Boolean).length;
-    if (!map[sym] || cnt > map[sym]._cnt) map[sym] = { ...c.platforms, _cnt: cnt };
+    if (!map[sym] || cnt > map[sym]._cnt) map[sym] = { ...c.platforms, _cnt: cnt, _id: c.id };
   }
   coinPlatforms = map;
   localStorage.setItem('cg_platforms', JSON.stringify({ t: Date.now(), d: map }));
@@ -205,7 +205,19 @@ async function getOnchainFlow(base, price) {
     }
     if (!found) return null;
     const netOutTokens = totalOut - totalIn;
-    return { netOutUsd: netOutTokens * price, inUsd: totalIn*price, outUsd: totalOut*price };
+    const netOutUsd = netOutTokens * price;
+
+    // 시총 조회 (CoinGecko) → 순입출금이 시총의 몇 %인지
+    let mcap = 0;
+    try {
+      if (p._id) {
+        const mc = await fetchJSON(`https://api.coingecko.com/api/v3/simple/price?ids=${p._id}&vs_currencies=usd&include_market_cap=true`);
+        mcap = mc[p._id]?.usd_market_cap || 0;
+      }
+    } catch {}
+    const pctMcap = mcap > 0 ? (Math.abs(netOutUsd) / mcap * 100) : null;
+
+    return { netOutUsd, inUsd: totalIn*price, outUsd: totalOut*price, mcap, pctMcap };
   } catch { return null; }
 }
 
@@ -747,6 +759,18 @@ function fmtNum(n, d=2) {
   if (Math.abs(n) >= 1e3) return (n/1e3).toFixed(d) + 'K';
   return n.toFixed(d);
 }
+// 선물(OI) vs 온체인(현물) 신호 비교 해설
+function getFlowComment(r) {
+  if (!r.onchain) return null;
+  const onOut = r.onchain.netOutUsd > 0;  // 거래소 순유출 = 현물 매집
+  const onIn = r.onchain.netOutUsd < 0;   // 거래소 순유입 = 현물 매도
+  if (r.strongBuy && onIn) return { txt: '⚠️ 선물 롱 vs 현물 매도 — 단기 반등이나 위에서 매물 대기, 경계', color: '#fbbf24', bg: 'rgba(251,191,36,0.1)' };
+  if (r.strongShort && onOut) return { txt: '⚠️ 선물 숏 vs 현물 매집 — 큰손은 담는 중, 숏 반등 주의', color: '#fbbf24', bg: 'rgba(251,191,36,0.1)' };
+  if (r.strongBuy && onOut) return { txt: '✅ 선물 롱 + 현물 매집 — 매수 신호 일치(강함)', color: '#4ade80', bg: 'rgba(74,222,128,0.1)' };
+  if (r.strongShort && onIn) return { txt: '✅ 선물 숏 + 현물 매도 — 매도 신호 일치(강함)', color: '#f87171', bg: 'rgba(248,113,113,0.1)' };
+  return null;
+}
+
 function fmtUsd(n) {
   const a = Math.abs(n);
   if (a >= 1e9) return '$' + (n/1e9).toFixed(2) + 'B';
@@ -776,7 +800,7 @@ function renderCards(res) {
         <div class="coin-badges">
           ${r.strongBuy ? `<span class="badge ma-just">💪 강한 매수<span class="tip">OI 증가 + 펀딩비 양수 = 롱 진입 활발${r.todayReturn >= 0 ? ' (양봉 동반)' : ' (음봉 — 저점 매집 가능)'}</span></span>` : ''}
           ${r.strongShort ? `<span class="badge" style="background:#7f1d1d;color:#fca5a5;animation:pulse 1.5s infinite">📉 강한 숏<span class="tip">OI 증가 + 펀딩비 숏우세 = 숏 진입 활발${r.todayReturn < 0 ? ' (음봉 동반)' : ' (양봉 — 숏스퀴즈 주의)'}</span></span>` : ''}
-          ${r.onchain ? `<span class="badge" style="background:${r.onchain.netOutUsd >= 0 ? '#14532d' : '#451a1a'};color:${r.onchain.netOutUsd >= 0 ? '#4ade80' : '#f87171'}">⛓️ ${r.onchain.netOutUsd >= 0 ? '순유출' : '순유입'} ${fmtUsd(Math.abs(r.onchain.netOutUsd))}<span class="tip">7일 바이낸스 핫월렛 ${r.onchain.netOutUsd >= 0 ? '순유출(매집 정황) — 거래소 밖으로 빠져나감' : '순유입(매도 정황) — 거래소로 들어옴'}<br>유출 ${fmtUsd(r.onchain.outUsd)} / 유입 ${fmtUsd(r.onchain.inUsd)}</span></span>` : ''}
+          ${r.onchain ? `<span class="badge" style="background:${r.onchain.netOutUsd >= 0 ? '#14532d' : '#451a1a'};color:${r.onchain.netOutUsd >= 0 ? '#4ade80' : '#f87171'}">⛓️ ${r.onchain.netOutUsd >= 0 ? '순유출' : '순유입'} ${fmtUsd(Math.abs(r.onchain.netOutUsd))}${r.onchain.pctMcap != null ? ` (시총 ${r.onchain.pctMcap.toFixed(2)}%)` : ''}<span class="tip">7일 바이낸스 핫월렛 ${r.onchain.netOutUsd >= 0 ? '순유출(매집 정황) — 거래소 밖으로 빠져나감' : '순유입(매도 정황) — 거래소로 들어옴'}<br>유출 ${fmtUsd(r.onchain.outUsd)} / 유입 ${fmtUsd(r.onchain.inUsd)}${r.onchain.pctMcap != null ? `<br>시총 대비 ${r.onchain.pctMcap.toFixed(2)}% ${r.onchain.pctMcap >= 1 ? '(영향력 큼)' : '(미미)'}` : ''}</span></span>` : ''}
           <span class="badge corr">ρ = ${r.corr.toFixed(3)}<span class="tip">BTC와의 상관계수 (${Math.abs(r.corr) < 0.1 ? '거의 무관' : (Math.abs(r.corr) < 0.3 ? '약한 ' : Math.abs(r.corr) < 0.5 ? '보통 ' : Math.abs(r.corr) < 0.7 ? '강한 ' : '매우 강한 ') + (r.corr < 0 ? '역상관' : '상관')})</span></span>
           ${r.hasVolSpike ? `<span class="badge vol-spike">🔥 거래량 +${r.volSpikePct.toFixed(0)}%<span class="tip">3일 평균 거래량이 ${volPeriodLabel} 평균 대비 ${r.volSpikePct.toFixed(0)}% 급등</span></span>` : `<span class="badge ${r.volSpikePct >= 0 ? 'vol-up' : 'vol-down'}">거래량 ${r.volSpikePct >= 0 ? '+' : ''}${r.volSpikePct.toFixed(0)}%<span class="tip">3일 평균 거래량 vs ${volPeriodLabel} 평균 변화율</span></span>`}
           <span class="badge ${r.todayReturn >= 0 ? 'vol-up' : 'vol-down'}">오늘 ${r.todayReturn >= 0 ? '+' : ''}${r.todayReturn.toFixed(1)}%<span class="tip">오늘 하루 수익률 (전일 종가 대비)</span></span>
@@ -799,6 +823,7 @@ function renderCards(res) {
         <span class="tag">대형주문($1K+) <span class="v">${r.whaleRatio.toFixed(1)}% (${r.whaleCount}건)</span></span>
         ${r.whaleCount > 0 ? `<span class="tag" style="min-width:80px">매수/매도<div class="whale-bar"><div class="buy" style="width:${r.whaleBuyVol + r.whaleSellVol > 0 ? (r.whaleBuyVol / (r.whaleBuyVol + r.whaleSellVol) * 100).toFixed(0) : 50}%"></div><div class="sell" style="width:${r.whaleBuyVol + r.whaleSellVol > 0 ? (r.whaleSellVol / (r.whaleBuyVol + r.whaleSellVol) * 100).toFixed(0) : 50}%"></div></div></span>` : ''}
       </div>
+      ${(() => { const c = getFlowComment(r); return c ? `<div style="font-size:11px;font-weight:600;color:${c.color};background:${c.bg};padding:6px 10px;border-radius:6px;margin-bottom:8px">${c.txt}</div>` : ''; })()}
       <div class="chart-wrap" style="cursor:pointer" onclick="window.open('https://www.tradingview.com/chart/WjXriYBc/?symbol=BINANCE:${r.base}USDT','_blank')"><canvas id="chart_${i}"></canvas></div>
     </div>
   `).join('');
