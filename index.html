@@ -111,6 +111,8 @@ body { background: #0a0e17; color: #e0e0e0; font-family: 'Segoe UI', sans-serif;
     <span style="color:#334155;font-size:18px">|</span>
     <input type="text" id="searchCoin" placeholder="코인 검색 (예: SOL)" style="width:120px;text-transform:uppercase" onkeydown="if(event.key==='Enter')searchCoin()">
     <button onclick="searchCoin()">분석</button>
+    <span style="color:#334155;font-size:18px">|</span>
+    <input type="password" id="etherscanKey" placeholder="⛓️ Etherscan 키 (선택)" style="width:140px" onchange="saveEtherscanKey()" title="입력 시 거래량 급등 종목의 거래소 순입출금(온체인) 추적">
   </div>
 </div>
 <div class="status-bar">
@@ -131,6 +133,82 @@ let results = [];
 let volPeriodLabel = '30일';
 let chartInstances = {};
 let altSeasonData = null;
+
+// ─── 온체인 거래소 순입출금 (Etherscan V2) ───
+let etherscanKey = localStorage.getItem('etherscan_key') || '';
+let coinPlatforms = null; // CoinGecko 심볼→컨트랙트 매핑 캐시
+
+function saveEtherscanKey() {
+  etherscanKey = document.getElementById('etherscanKey').value.trim();
+  localStorage.setItem('etherscan_key', etherscanKey);
+  document.getElementById('statusText').textContent = etherscanKey ? '⛓️ Etherscan 키 저장됨 — 다음 스캔부터 거래량 급등 종목 온체인 추적' : 'Etherscan 키 제거됨';
+}
+
+// 체인별 설정: chainid + 바이낸스 핫월렛 + CoinGecko platform 키
+const CHAINS = [
+  { id: 1, cg: 'ethereum', wallets: [
+    '0x28C6c06298d514Db089934071355E5743bf21d60','0x21a31Ee1afC51d94C2eFcCAa2092aD1028285549',
+    '0xDFd5293D8e347dFe59E90eFd55b2956a1343963d','0xF977814e90dA44bFA03b6295A0616a897441aceC' ] },
+  { id: 56, cg: 'binance-smart-chain', wallets: [
+    '0x8894E0a0c962CB723c1976a4421c95949bE2D4E3','0xF977814e90dA44bFA03b6295A0616a897441aceC',
+    '0x5a52E96BAcdaBb82fd05763E25335261B270Efcb' ] },
+];
+
+// CoinGecko 토큰 컨트랙트 매핑 로드 (1회, 1일 캐시)
+async function loadCoinPlatforms() {
+  if (coinPlatforms) return coinPlatforms;
+  const cached = JSON.parse(localStorage.getItem('cg_platforms') || 'null');
+  if (cached && Date.now() - cached.t < 86400000) { coinPlatforms = cached.d; return coinPlatforms; }
+  const list = await fetchJSON('https://api.coingecko.com/api/v3/coins/list?include_platform=true');
+  const map = {};
+  for (const c of list) {
+    const sym = (c.symbol || '').toUpperCase();
+    if (!sym || !c.platforms) continue;
+    const cnt = Object.values(c.platforms).filter(Boolean).length;
+    if (!map[sym] || cnt > map[sym]._cnt) map[sym] = { ...c.platforms, _cnt: cnt };
+  }
+  coinPlatforms = map;
+  localStorage.setItem('cg_platforms', JSON.stringify({ t: Date.now(), d: map }));
+  return map;
+}
+
+// 특정 코인의 7일 거래소 순입출금 (USD)
+async function getOnchainFlow(base, price) {
+  if (!etherscanKey) return null;
+  try {
+    const platforms = await loadCoinPlatforms();
+    const p = platforms[base.toUpperCase()];
+    if (!p) return null;
+    const cutoff = Math.floor(Date.now()/1000) - 7*86400;
+    let totalIn = 0, totalOut = 0, found = false;
+
+    for (const chain of CHAINS) {
+      const contract = p[chain.cg];
+      if (!contract) continue;
+      for (const w of chain.wallets) {
+        const url = `https://api.etherscan.io/v2/api?chainid=${chain.id}&module=account&action=tokentx&contractaddress=${contract}&address=${w}&page=1&offset=1000&sort=desc&apikey=${etherscanKey}`;
+        try {
+          const data = await fetchJSON(url);
+          if (data.status !== '1' || !Array.isArray(data.result)) continue;
+          found = true;
+          const dec = data.result[0] ? +data.result[0].tokenDecimal : 18;
+          const wl = w.toLowerCase();
+          for (const tx of data.result) {
+            if (+tx.timeStamp < cutoff) break;
+            const val = +tx.value / Math.pow(10, dec);
+            if (tx.to.toLowerCase() === wl) totalIn += val;
+            else if (tx.from.toLowerCase() === wl) totalOut += val;
+          }
+        } catch {}
+        await new Promise(r => setTimeout(r, 220));
+      }
+    }
+    if (!found) return null;
+    const netOutTokens = totalOut - totalIn;
+    return { netOutUsd: netOutTokens * price, inUsd: totalIn*price, outUsd: totalOut*price };
+  } catch { return null; }
+}
+
 // watchlist: [{symbol, date, price}] — 기존 문자열 배열 마이그레이션
 let watchlist = (JSON.parse(localStorage.getItem('btc_watchlist') || '[]')).map(w =>
   typeof w === 'string' ? { symbol: w, date: null, price: null } : w
@@ -585,6 +663,20 @@ async function startScan() {
     renderSummary(results, candidates.length);
     renderResults(results);
     statusEl.textContent = `완료! ${candidates.length}개 중 ${results.length}개 비상관 코인 발견`;
+
+    // 온체인 거래소 순입출금 (거래량 급등 종목만, 키 있을 때)
+    if (etherscanKey) {
+      const spikes = results.filter(r => r.hasVolSpike);
+      statusEl.textContent = `⛓️ 거래량 급등 ${spikes.length}개 온체인 추적 중...`;
+      let done = 0;
+      for (const r of spikes) {
+        r.onchain = await getOnchainFlow(r.base, r.lastPrice);
+        done++;
+        statusEl.textContent = `⛓️ 온체인 추적 ${done}/${spikes.length} (${r.base})`;
+        renderResults(lastRendered); // 점진 갱신
+      }
+      statusEl.textContent = `완료! ${results.length}개 비상관 · 온체인 ${spikes.length}개 추적`;
+    }
   } catch (e) {
     statusEl.textContent = `에러: ${e.message}`;
   }
@@ -655,6 +747,13 @@ function fmtNum(n, d=2) {
   if (Math.abs(n) >= 1e3) return (n/1e3).toFixed(d) + 'K';
   return n.toFixed(d);
 }
+function fmtUsd(n) {
+  const a = Math.abs(n);
+  if (a >= 1e9) return '$' + (n/1e9).toFixed(2) + 'B';
+  if (a >= 1e6) return '$' + (n/1e6).toFixed(2) + 'M';
+  if (a >= 1e3) return '$' + (n/1e3).toFixed(1) + 'K';
+  return '$' + Math.round(n);
+}
 
 let lastRendered = [];
 function renderResults(res) {
@@ -677,6 +776,7 @@ function renderCards(res) {
         <div class="coin-badges">
           ${r.strongBuy ? `<span class="badge ma-just">💪 강한 매수<span class="tip">OI 증가 + 펀딩비 양수 = 롱 진입 활발${r.todayReturn >= 0 ? ' (양봉 동반)' : ' (음봉 — 저점 매집 가능)'}</span></span>` : ''}
           ${r.strongShort ? `<span class="badge" style="background:#7f1d1d;color:#fca5a5;animation:pulse 1.5s infinite">📉 강한 숏<span class="tip">OI 증가 + 펀딩비 숏우세 = 숏 진입 활발${r.todayReturn < 0 ? ' (음봉 동반)' : ' (양봉 — 숏스퀴즈 주의)'}</span></span>` : ''}
+          ${r.onchain ? `<span class="badge" style="background:${r.onchain.netOutUsd >= 0 ? '#14532d' : '#451a1a'};color:${r.onchain.netOutUsd >= 0 ? '#4ade80' : '#f87171'}">⛓️ ${r.onchain.netOutUsd >= 0 ? '순유출' : '순유입'} ${fmtUsd(Math.abs(r.onchain.netOutUsd))}<span class="tip">7일 바이낸스 핫월렛 ${r.onchain.netOutUsd >= 0 ? '순유출(매집 정황) — 거래소 밖으로 빠져나감' : '순유입(매도 정황) — 거래소로 들어옴'}<br>유출 ${fmtUsd(r.onchain.outUsd)} / 유입 ${fmtUsd(r.onchain.inUsd)}</span></span>` : ''}
           <span class="badge corr">ρ = ${r.corr.toFixed(3)}<span class="tip">BTC와의 상관계수 (${Math.abs(r.corr) < 0.1 ? '거의 무관' : (Math.abs(r.corr) < 0.3 ? '약한 ' : Math.abs(r.corr) < 0.5 ? '보통 ' : Math.abs(r.corr) < 0.7 ? '강한 ' : '매우 강한 ') + (r.corr < 0 ? '역상관' : '상관')})</span></span>
           ${r.hasVolSpike ? `<span class="badge vol-spike">🔥 거래량 +${r.volSpikePct.toFixed(0)}%<span class="tip">3일 평균 거래량이 ${volPeriodLabel} 평균 대비 ${r.volSpikePct.toFixed(0)}% 급등</span></span>` : `<span class="badge ${r.volSpikePct >= 0 ? 'vol-up' : 'vol-down'}">거래량 ${r.volSpikePct >= 0 ? '+' : ''}${r.volSpikePct.toFixed(0)}%<span class="tip">3일 평균 거래량 vs ${volPeriodLabel} 평균 변화율</span></span>`}
           <span class="badge ${r.todayReturn >= 0 ? 'vol-up' : 'vol-down'}">오늘 ${r.todayReturn >= 0 ? '+' : ''}${r.todayReturn.toFixed(1)}%<span class="tip">오늘 하루 수익률 (전일 종가 대비)</span></span>
@@ -910,13 +1010,27 @@ async function searchCoin() {
     results = [r, ...results.filter(x => x.symbol !== symbol)];
     renderResults(results);
     statusEl.textContent = `✅ ${base} 분석 완료 (점수: ${r.bullScore}, 상관계수: ${(r.corr||0).toFixed(3)})`;
-
-    // 맨 위로 스크롤
     document.getElementById('cardGrid')?.scrollIntoView({behavior:'smooth'});
+
+    // 온체인 거래소 순입출금 (키 있을 때)
+    if (etherscanKey) {
+      statusEl.textContent = `⛓️ ${base} 온체인 추적 중...`;
+      r.onchain = await getOnchainFlow(r.base, r.lastPrice);
+      renderResults(results);
+      statusEl.textContent = r.onchain
+        ? `✅ ${base} · 온체인 ${r.onchain.netOutUsd>=0?'순유출':'순유입'} ${fmtUsd(Math.abs(r.onchain.netOutUsd))}`
+        : `✅ ${base} 분석 완료 (온체인 데이터 없음 — 컨트랙트 미지원)`;
+    }
   } catch(e) {
     statusEl.textContent = `❌ ${symbol} 분석 실패: ${e.message}`;
   }
 }
+
+// 초기화: 저장된 Etherscan 키 입력란에 표시
+(function initKey(){
+  const el = document.getElementById('etherscanKey');
+  if (el && etherscanKey) el.value = etherscanKey;
+})();
 </script>
 </body>
 </html>
