@@ -180,7 +180,11 @@ async function getOnchainFlow(base, price) {
     const p = platforms[base.toUpperCase()];
     if (!p) return null;
     const cutoff = Math.floor(Date.now()/1000) - 7*86400;
-    let totalIn = 0, totalOut = 0, found = false;
+    let totalIn = 0, totalOut = 0, found = false, decimals = 18;
+    const known = new Set(CHAINS.flatMap(c => c.wallets.map(w => w.toLowerCase())));
+    const recvMap = {}; // 거래소에서 받아간 지갑 (매집 주체)
+    const sendMap = {}; // 거래소로 보낸 지갑 (매도 주체)
+    let ethContract = p.ethereum;
 
     for (const chain of CHAINS) {
       const contract = p[chain.cg];
@@ -192,12 +196,19 @@ async function getOnchainFlow(base, price) {
           if (data.status !== '1' || !Array.isArray(data.result)) continue;
           found = true;
           const dec = data.result[0] ? +data.result[0].tokenDecimal : 18;
+          if (chain.id === 1) decimals = dec;
           const wl = w.toLowerCase();
           for (const tx of data.result) {
             if (+tx.timeStamp < cutoff) break;
             const val = +tx.value / Math.pow(10, dec);
-            if (tx.to.toLowerCase() === wl) totalIn += val;
-            else if (tx.from.toLowerCase() === wl) totalOut += val;
+            const to = tx.to.toLowerCase(), from = tx.from.toLowerCase();
+            if (to === wl) { // 거래소 유입
+              totalIn += val;
+              if (chain.id === 1 && !known.has(from)) sendMap[from] = (sendMap[from]||0) + val;
+            } else if (from === wl) { // 거래소 유출
+              totalOut += val;
+              if (chain.id === 1 && !known.has(to)) recvMap[to] = (recvMap[to]||0) + val;
+            }
           }
         } catch {}
         await new Promise(r => setTimeout(r, 220));
@@ -207,7 +218,7 @@ async function getOnchainFlow(base, price) {
     const netOutTokens = totalOut - totalIn;
     const netOutUsd = netOutTokens * price;
 
-    // 시총 조회 (CoinGecko) → 순입출금이 시총의 몇 %인지
+    // 시총 조회 (CoinGecko)
     let mcap = 0;
     try {
       if (p._id) {
@@ -217,7 +228,33 @@ async function getOnchainFlow(base, price) {
     } catch {}
     const pctMcap = mcap > 0 ? (Math.abs(netOutUsd) / mcap * 100) : null;
 
-    return { netOutUsd, inUsd: totalIn*price, outUsd: totalOut*price, mcap, pctMcap };
+    // 큰손 추적: 매집이면 수신지갑, 매도면 송신지갑 (ETH 체인)
+    let whales = [];
+    if (ethContract) {
+      const targetMap = netOutTokens >= 0 ? recvMap : sendMap;
+      const top = Object.entries(targetMap).sort((a,b) => b[1]-a[1]).slice(0,3);
+      if (top.length) {
+        // 총공급 조회
+        let supply = 0;
+        try {
+          const s = await fetchJSON(`https://api.etherscan.io/v2/api?chainid=1&module=stats&action=tokensupply&contractaddress=${ethContract}&apikey=${etherscanKey}`);
+          supply = +s.result / Math.pow(10, decimals);
+        } catch {}
+        await new Promise(r => setTimeout(r, 220));
+        for (const [addr, amt] of top) {
+          let bal = 0;
+          try {
+            const b = await fetchJSON(`https://api.etherscan.io/v2/api?chainid=1&module=account&action=tokenbalance&contractaddress=${ethContract}&address=${addr}&tag=latest&apikey=${etherscanKey}`);
+            bal = +b.result / Math.pow(10, decimals);
+          } catch {}
+          const pct = supply > 0 ? bal/supply*100 : 0;
+          whales.push({ addr, amtUsd: amt*price, balPct: pct, isWhale: pct >= 0.3 });
+          await new Promise(r => setTimeout(r, 220));
+        }
+      }
+    }
+
+    return { netOutUsd, inUsd: totalIn*price, outUsd: totalOut*price, mcap, pctMcap, whales, side: netOutTokens>=0?'recv':'send' };
   } catch { return null; }
 }
 
@@ -824,6 +861,7 @@ function renderCards(res) {
         ${r.whaleCount > 0 ? `<span class="tag" style="min-width:80px">매수/매도<div class="whale-bar"><div class="buy" style="width:${r.whaleBuyVol + r.whaleSellVol > 0 ? (r.whaleBuyVol / (r.whaleBuyVol + r.whaleSellVol) * 100).toFixed(0) : 50}%"></div><div class="sell" style="width:${r.whaleBuyVol + r.whaleSellVol > 0 ? (r.whaleSellVol / (r.whaleBuyVol + r.whaleSellVol) * 100).toFixed(0) : 50}%"></div></div></span>` : ''}
       </div>
       ${(() => { const c = getFlowComment(r); return c ? `<div style="font-size:11px;font-weight:600;color:${c.color};background:${c.bg};padding:6px 10px;border-radius:6px;margin-bottom:8px">${c.txt}</div>` : ''; })()}
+      ${(r.onchain && r.onchain.whales && r.onchain.whales.length) ? `<div style="font-size:10px;color:#8892a4;margin-bottom:8px;line-height:1.6">${r.onchain.side==='recv'?'🐋 매집(거래소 출금 수신) TOP':'📤 매도(거래소 입금 송신) TOP'}: ${r.onchain.whales.map(w => `<a href="https://etherscan.io/address/${w.addr}" target="_blank" style="color:${w.isWhale?'#fbbf24':'#94a3b8'};text-decoration:none">${w.addr.slice(0,6)}…${w.addr.slice(-4)} <b>${r.onchain.side==='recv'?`(보유 ${w.balPct.toFixed(2)}%${w.isWhale?' 🐋':''})`:`(${fmtUsd(w.amtUsd)})`}</b></a>`).join(' · ')}</div>` : ''}
       <div class="chart-wrap" style="cursor:pointer" onclick="window.open('https://www.tradingview.com/chart/WjXriYBc/?symbol=BINANCE:${r.base}USDT','_blank')"><canvas id="chart_${i}"></canvas></div>
     </div>
   `).join('');
