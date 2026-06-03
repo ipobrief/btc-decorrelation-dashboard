@@ -154,6 +154,42 @@ const CHAINS = [
     '0x5a52E96BAcdaBb82fd05763E25335261B270Efcb' ] },
 ];
 
+// 체인 약어 매핑
+const CHAIN_LABELS = {
+  'ethereum':'ETH','binance-smart-chain':'BSC','solana':'SOL','polygon-pos':'POL',
+  'arbitrum-one':'ARB','avalanche':'AVAX','optimistic-ethereum':'OP','base':'BASE',
+  'sui':'SUI','aptos':'APT','tron':'TRX','the-open-network':'TON','near-protocol':'NEAR',
+  'cardano':'ADA','cosmos':'ATOM','sei-network':'SEI','hyperliquid':'HYPE',
+  'stellar':'XLM','algorand':'ALGO','fantom':'FTM','zksync':'zkSync','linea':'LINEA',
+  'blast':'BLAST','mantle':'MNT','celo':'CELO','gnosis':'GNO','moonbeam':'GLMR',
+};
+const CHAIN_PRIORITY = ['ethereum','solana','binance-smart-chain','base','arbitrum-one','sui','aptos','tron','the-open-network','polygon-pos'];
+
+// L1 네이티브 코인 (자기 이름이 곧 체인)
+const NATIVE_CHAIN = {
+  ETH:'ETH', BNB:'BNB', SOL:'SOL', ADA:'ADA', AVAX:'AVAX', DOT:'DOT', NEAR:'NEAR',
+  ATOM:'ATOM', APT:'APT', SUI:'SUI', TON:'TON', TRX:'TRX', MATIC:'POL', POL:'POL',
+  FTM:'FTM', S:'SONIC', ALGO:'ALGO', XLM:'XLM', SEI:'SEI', HBAR:'HBAR', EGLD:'EGLD',
+  FLOW:'FLOW', KAVA:'KAVA', INJ:'INJ', TIA:'TIA', ARB:'ARB', OP:'OP', BERA:'BERA',
+  HYPE:'HYPE', KAS:'KAS', ICP:'ICP', FIL:'FIL', ROSE:'ROSE', MNT:'MNT', RUNE:'RUNE',
+};
+
+// 코인의 주요 체인 약어 (최대 2개)
+function getCoinChains(base) {
+  const B = base.toUpperCase();
+  if (NATIVE_CHAIN[B]) return [NATIVE_CHAIN[B]]; // L1 네이티브 우선
+  if (!coinPlatforms) return [];
+  const p = coinPlatforms[B];
+  if (!p) return [];
+  const chains = Object.keys(p).filter(k => k[0] !== '_' && p[k]); // 컨트랙트 있는 체인
+  if (!chains.length) return [];
+  chains.sort((a,b) => {
+    const ia = CHAIN_PRIORITY.indexOf(a), ib = CHAIN_PRIORITY.indexOf(b);
+    return (ia<0?99:ia) - (ib<0?99:ib);
+  });
+  return chains.slice(0,2).map(c => CHAIN_LABELS[c] || c.slice(0,4).toUpperCase());
+}
+
 // CoinGecko 토큰 컨트랙트 매핑 로드 (1회, 1일 캐시)
 async function loadCoinPlatforms() {
   if (coinPlatforms) return coinPlatforms;
@@ -530,6 +566,7 @@ async function startScan() {
   btn.disabled = true;
   btn.textContent = '스캔 중...';
   fetchAltSeasonSignal(); // 알트장 신호 백그라운드 로딩
+  loadCoinPlatforms().then(() => { if (lastRendered.length) renderResults(lastRendered); }).catch(()=>{}); // 체인 정보 백그라운드 로딩
   const statusEl = document.getElementById('statusText');
   const progressEl = document.getElementById('progressBar');
   const period = +document.getElementById('period').value;
@@ -833,7 +870,7 @@ function renderCards(res) {
   grid.innerHTML = res.map((r, i) => `
     <div class="coin-card${r.corr < 0 ? ' highlight' : ''}${r.hasVolSpike ? ' vol-spike' : ''}">
       <div class="coin-header">
-        <div class="coin-name"><span onclick="toggleWatch('${r.symbol}', ${r.lastPrice}, event)" style="cursor:pointer;font-size:17px;margin-right:5px;color:${isWatched(r.symbol) ? '#fbbf24' : '#475569'};vertical-align:middle" title="관심종목">${isWatched(r.symbol) ? '★' : '☆'}</span>${r.base}<small>/USDT</small> <span class="score-btn" onclick="event.stopPropagation();showScore(${i})" style="font-size:12px; padding:2px 6px; border-radius:4px; font-weight:700; background:${r.bullScore >= 50 ? '#166534' : r.bullScore >= 30 ? '#14532d' : r.bullScore >= 10 ? '#1e3a1e' : r.bullScore >= 0 ? '#1e293b' : '#451a1a'}; color:${r.bullScore >= 30 ? '#4ade80' : r.bullScore >= 10 ? '#86efac' : r.bullScore >= 0 ? '#94a3b8' : '#f87171'}">${r.bullScore}점</span>${(() => { const w = getWatch(r.symbol); if (!w || !w.date || !w.price) return ''; const ret = (r.lastPrice - w.price) / w.price * 100; return `<span style="font-size:11px;margin-left:8px;color:#8892a4">⭐${w.date.slice(5)} 등록 · <b style="color:${ret>=0?'#4ade80':'#f87171'}">${ret>=0?'+':''}${ret.toFixed(1)}%</b></span>`; })()}</div>
+        <div class="coin-name"><span onclick="toggleWatch('${r.symbol}', ${r.lastPrice}, event)" style="cursor:pointer;font-size:17px;margin-right:5px;color:${isWatched(r.symbol) ? '#fbbf24' : '#475569'};vertical-align:middle" title="관심종목">${isWatched(r.symbol) ? '★' : '☆'}</span>${r.base}<small>/USDT</small>${(() => { const ch = getCoinChains(r.base); return ch.length ? ' ' + ch.map(c => `<span style="font-size:9px;font-weight:700;color:#94a3b8;background:#1e293b;padding:1px 5px;border-radius:3px;vertical-align:middle">${c}</span>`).join(' ') : ''; })()} <span class="score-btn" onclick="event.stopPropagation();showScore(${i})" style="font-size:12px; padding:2px 6px; border-radius:4px; font-weight:700; background:${r.bullScore >= 50 ? '#166534' : r.bullScore >= 30 ? '#14532d' : r.bullScore >= 10 ? '#1e3a1e' : r.bullScore >= 0 ? '#1e293b' : '#451a1a'}; color:${r.bullScore >= 30 ? '#4ade80' : r.bullScore >= 10 ? '#86efac' : r.bullScore >= 0 ? '#94a3b8' : '#f87171'}">${r.bullScore}점</span>${(() => { const w = getWatch(r.symbol); if (!w || !w.date || !w.price) return ''; const ret = (r.lastPrice - w.price) / w.price * 100; return `<span style="font-size:11px;margin-left:8px;color:#8892a4">⭐${w.date.slice(5)} 등록 · <b style="color:${ret>=0?'#4ade80':'#f87171'}">${ret>=0?'+':''}${ret.toFixed(1)}%</b></span>`; })()}</div>
         <div class="coin-badges">
           ${r.strongBuy ? `<span class="badge ma-just">💪 강한 매수<span class="tip">OI 증가 + 펀딩비 양수 = 롱 진입 활발${r.todayReturn >= 0 ? ' (양봉 동반)' : ' (음봉 — 저점 매집 가능)'}</span></span>` : ''}
           ${r.strongShort ? `<span class="badge" style="background:#7f1d1d;color:#fca5a5;animation:pulse 1.5s infinite">📉 강한 숏<span class="tip">OI 증가 + 펀딩비 숏우세 = 숏 진입 활발${r.todayReturn < 0 ? ' (음봉 동반)' : ' (양봉 — 숏스퀴즈 주의)'}</span></span>` : ''}
