@@ -760,6 +760,9 @@ async function startScan() {
         done++;
         statusEl.textContent = `⛓️ 온체인 추적 ${done}/${spikes.length} (${r.base})`;
         renderResults(lastRendered); // 점진 갱신
+        // 순유출 카운트 실시간 갱신
+        const noEl = document.getElementById('netOutCount');
+        if (noEl) noEl.textContent = allScanResults.filter(x => x.onchain && x.onchain.netOutUsd > 0).length;
       }
       statusEl.textContent = `완료! ${results.length}개 비상관 · 온체인 ${spikes.length}개 추적`;
     }
@@ -822,7 +825,7 @@ function renderSummary(res, total) {
     <div class="stat" onclick="toggleSummaryFilter('volSpike')" style="cursor:pointer;border-color:#f97316;box-shadow:0 0 8px rgba(249,115,22,0.3)"><div class="val" style="color:#fb923c">${spikeCount}</div><div class="lbl">🔥 거래량 급등</div></div>
     <div class="stat" onclick="toggleSummaryFilter('strongBuy')" style="cursor:pointer;border-color:#4ade80;box-shadow:0 0 8px rgba(74,222,128,0.3)"><div class="val" style="color:#4ade80">${res.filter(r => r.strongBuy).length}</div><div class="lbl">💪 강한 매수</div></div>
     <div class="stat" onclick="toggleSummaryFilter('strongShort')" style="cursor:pointer;border-color:#ef4444;box-shadow:0 0 8px rgba(239,68,68,0.3)"><div class="val" style="color:#f87171">${res.filter(r => r.strongShort).length}</div><div class="lbl">📉 강한 숏</div></div>
-    <div class="stat" onclick="toggleSummaryFilter('netOut')" style="cursor:pointer;border-color:#10b981;box-shadow:0 0 8px rgba(16,185,129,0.3)"><div class="val" style="color:#34d399">${res.filter(r => r.onchain && r.onchain.netOutUsd > 0).length}</div><div class="lbl">⛓️ 순유출(매집)</div></div>
+    <div class="stat" onclick="toggleSummaryFilter('netOut')" style="cursor:pointer;border-color:#10b981;box-shadow:0 0 8px rgba(16,185,129,0.3)"><div class="val" style="color:#34d399"><span id="netOutCount">${res.filter(r => r.onchain && r.onchain.netOutUsd > 0).length}</span></div><div class="lbl">⛓️ 순유출(매집)</div></div>
     <div class="stat" onclick="showAltSeason()" style="cursor:pointer;border-color:#a78bfa;box-shadow:0 0 8px rgba(167,139,250,0.3)"><div class="val" style="color:${altSeasonData?(altSeasonData.verdictCls==='alt-on'?'#4ade80':altSeasonData.verdictCls==='alt-good'?'#86efac':altSeasonData.verdictCls==='alt-neutral'?'#fbbf24':'#f87171'):'#a78bfa'};font-size:15px;white-space:nowrap">${altSeasonData?altSeasonData.verdict:'로딩...'}</div><div class="lbl">📊 알트장 신호 (클릭)</div></div>
     <div class="stat" onclick="toggleSummaryFilter('watch')" style="cursor:pointer;border-color:#fbbf24;box-shadow:0 0 8px rgba(251,191,36,0.3)"><div class="val" style="color:#fbbf24"><span id="watchCount">${res.filter(r => isWatched(r.symbol)).length}</span></div><div class="lbl">⭐ 관심종목</div></div>
   `;
