@@ -733,10 +733,10 @@ async function startScan() {
       r.scoreDetail = sd;
       r.bullScore = sd.today + sd.avg3 + sd.ma + sd.vol + sd.oi + sd.fr + sd.squeeze + sd.whale;
 
-      // 강한 매수 우세 판정: OI 증가 + 펀딩비 양수 (가격 무관)
-      r.strongBuy = r.hasFutures && r.oiChgPct >= 5 && r.fundingRate > 0;
-      // 강한 숏 판정: OI 증가 + 펀딩비 숏우세(음수) (가격 무관)
-      r.strongShort = r.hasFutures && r.oiChgPct >= 5 && r.fundingRate < 0;
+      // 강한 매수 판정: OI 증가 + 펀딩비 양수 + 거래량 급증 (가격 무관)
+      r.strongBuy = r.hasFutures && r.oiChgPct > 0 && r.fundingRate > 0 && r.volSpikePct >= 50;
+      // 강한 숏 판정: OI 증가 + 펀딩비 숏우세(음수) + 거래량 급증
+      r.strongShort = r.hasFutures && r.oiChgPct > 0 && r.fundingRate < 0 && r.volSpikePct >= 50;
     });
 
     // 강한 매수 우세 → 숏스퀴즈 → 점수순 정렬
@@ -871,8 +871,8 @@ function renderCards(res) {
       <div class="coin-header">
         <div class="coin-name"><span onclick="toggleWatch('${r.symbol}', ${r.lastPrice}, event)" style="cursor:pointer;font-size:17px;margin-right:5px;color:${isWatched(r.symbol) ? '#fbbf24' : '#475569'};vertical-align:middle" title="관심종목">${isWatched(r.symbol) ? '★' : '☆'}</span>${r.base}<small>/USDT</small>${(() => { const ch = getCoinChains(r.base); return ch.length ? ' ' + ch.map(c => `<span style="font-size:9px;font-weight:700;color:#94a3b8;background:#1e293b;padding:1px 5px;border-radius:3px;vertical-align:middle">${c}</span>`).join(' ') : ''; })()} <span class="score-btn" onclick="event.stopPropagation();showScore(${i})" style="font-size:12px; padding:2px 6px; border-radius:4px; font-weight:700; background:${r.bullScore >= 50 ? '#166534' : r.bullScore >= 30 ? '#14532d' : r.bullScore >= 10 ? '#1e3a1e' : r.bullScore >= 0 ? '#1e293b' : '#451a1a'}; color:${r.bullScore >= 30 ? '#4ade80' : r.bullScore >= 10 ? '#86efac' : r.bullScore >= 0 ? '#94a3b8' : '#f87171'}">${r.bullScore}점</span>${(() => { const w = getWatch(r.symbol); if (!w || !w.date || !w.price) return ''; const ret = (r.lastPrice - w.price) / w.price * 100; return `<span style="font-size:11px;margin-left:8px;color:#8892a4">⭐${w.date.slice(5)} 등록 · <b style="color:${ret>=0?'#4ade80':'#f87171'}">${ret>=0?'+':''}${ret.toFixed(1)}%</b></span>`; })()}</div>
         <div class="coin-badges">
-          ${r.strongBuy ? `<span class="badge ma-just">💪 강한 매수<span class="tip">OI 증가 + 펀딩비 양수 = 롱 진입 활발${r.todayReturn >= 0 ? ' (양봉 동반)' : ' (음봉 — 저점 매집 가능)'}</span></span>` : ''}
-          ${r.strongShort ? `<span class="badge" style="background:#7f1d1d;color:#fca5a5;animation:pulse 1.5s infinite">📉 강한 숏<span class="tip">OI 증가 + 펀딩비 숏우세 = 숏 진입 활발${r.todayReturn < 0 ? ' (음봉 동반)' : ' (양봉 — 숏스퀴즈 주의)'}</span></span>` : ''}
+          ${r.strongBuy ? `<span class="badge ma-just">💪 강한 매수<span class="tip">OI 증가 + 펀딩비 양수 + 거래량 급증 = 롱 진입 활발${r.todayReturn >= 0 ? ' (양봉 동반)' : ' (음봉 — 저점 매집 가능)'}</span></span>` : ''}
+          ${r.strongShort ? `<span class="badge" style="background:#7f1d1d;color:#fca5a5;animation:pulse 1.5s infinite">📉 강한 숏<span class="tip">OI 증가 + 펀딩비 숏우세 + 거래량 급증 = 숏 진입 활발${r.todayReturn < 0 ? ' (음봉 동반)' : ' (양봉 — 숏스퀴즈 주의)'}</span></span>` : ''}
           ${r.onchain ? `<span class="badge" style="background:${r.onchain.netOutUsd >= 0 ? '#14532d' : '#451a1a'};color:${r.onchain.netOutUsd >= 0 ? '#4ade80' : '#f87171'}">⛓️ ${r.onchain.netOutUsd >= 0 ? '순유출' : '순유입'} ${fmtUsd(Math.abs(r.onchain.netOutUsd))}${r.onchain.pctMcap != null ? ` (시총 ${r.onchain.pctMcap.toFixed(2)}%)` : ''}<span class="tip">7일 바이낸스 핫월렛 ${r.onchain.netOutUsd >= 0 ? '순유출(매집 정황) — 거래소 밖으로 빠져나감' : '순유입(매도 정황) — 거래소로 들어옴'}<br>유출 ${fmtUsd(r.onchain.outUsd)} / 유입 ${fmtUsd(r.onchain.inUsd)}${r.onchain.pctMcap != null ? `<br>시총 대비 ${r.onchain.pctMcap.toFixed(2)}% ${r.onchain.pctMcap >= 1 ? '(영향력 큼)' : '(미미)'}` : ''}</span></span>` : ''}
           <span class="badge corr">ρ = ${r.corr.toFixed(3)}<span class="tip">BTC와의 상관계수 (${Math.abs(r.corr) < 0.1 ? '거의 무관' : (Math.abs(r.corr) < 0.3 ? '약한 ' : Math.abs(r.corr) < 0.5 ? '보통 ' : Math.abs(r.corr) < 0.7 ? '강한 ' : '매우 강한 ') + (r.corr < 0 ? '역상관' : '상관')})</span></span>
           ${r.hasVolSpike ? `<span class="badge vol-spike">🔥 거래량 +${r.volSpikePct.toFixed(0)}%<span class="tip">3일 평균 거래량이 ${volPeriodLabel} 평균 대비 ${r.volSpikePct.toFixed(0)}% 급등</span></span>` : `<span class="badge ${r.volSpikePct >= 0 ? 'vol-up' : 'vol-down'}">거래량 ${r.volSpikePct >= 0 ? '+' : ''}${r.volSpikePct.toFixed(0)}%<span class="tip">3일 평균 거래량 vs ${volPeriodLabel} 평균 변화율</span></span>`}
@@ -1102,8 +1102,8 @@ async function searchCoin() {
     sd.whale = r.whaleRatio >= 50 ? 5 : r.whaleRatio >= 30 ? 3 : r.whaleRatio >= 10 ? 1 : 0;
     r.scoreDetail = sd;
     r.bullScore = sd.today + sd.avg3 + sd.ma + sd.vol + sd.oi + sd.fr + sd.squeeze + sd.whale;
-    r.strongBuy = r.hasFutures && r.oiChgPct >= 5 && r.fundingRate > 0;
-    r.strongShort = r.hasFutures && r.oiChgPct >= 5 && r.fundingRate < 0;
+    r.strongBuy = r.hasFutures && r.oiChgPct > 0 && r.fundingRate > 0 && r.volSpikePct >= 50;
+    r.strongShort = r.hasFutures && r.oiChgPct > 0 && r.fundingRate < 0 && r.volSpikePct >= 50;
 
     // 검색 결과를 맨 앞에 추가하고 렌더링
     results = [r, ...results.filter(x => x.symbol !== symbol)];
