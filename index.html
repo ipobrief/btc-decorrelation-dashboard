@@ -654,6 +654,8 @@ async function startScan() {
             getFuturesData(s.symbol),
             getWhaleRatio(s.symbol, lastPrice)
           ]);
+          // 선물 미상장 종목 제외 (선물투자용)
+          if (!futuresData.hasFutures) return null;
           const oiSignal = futuresData.hasFutures ? getOISignal(futuresData.oiChgPct, futuresData.fundingRate, todayReturn) : { label: '', emoji: '', cls: '' };
 
           return {
