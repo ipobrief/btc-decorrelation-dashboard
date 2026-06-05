@@ -750,21 +750,21 @@ async function startScan() {
     renderResults(results);
     statusEl.textContent = `완료! ${candidates.length}개 중 ${results.length}개 비상관 코인 발견`;
 
-    // 온체인 거래소 순입출금 (거래량 급등 종목만, 키 있을 때)
+    // 온체인 거래소 순입출금 (거래량 급등 + 강한매수 종목, 키 있을 때)
     if (etherscanKey) {
-      const spikes = results.filter(r => r.hasVolSpike);
-      statusEl.textContent = `⛓️ 거래량 급등 ${spikes.length}개 온체인 추적 중...`;
+      const targets = results.filter(r => r.hasVolSpike || r.strongBuy);
+      statusEl.textContent = `⛓️ 거래량급등+강한매수 ${targets.length}개 온체인 추적 중...`;
       let done = 0;
-      for (const r of spikes) {
+      for (const r of targets) {
         r.onchain = await getOnchainFlow(r.base, r.lastPrice);
         done++;
-        statusEl.textContent = `⛓️ 온체인 추적 ${done}/${spikes.length} (${r.base})`;
+        statusEl.textContent = `⛓️ 온체인 추적 ${done}/${targets.length} (${r.base})`;
         renderResults(lastRendered); // 점진 갱신
         // 순유출 카운트 실시간 갱신
         const noEl = document.getElementById('netOutCount');
         if (noEl) noEl.textContent = allScanResults.filter(x => x.onchain && x.onchain.netOutUsd > 0).length;
       }
-      statusEl.textContent = `완료! ${results.length}개 비상관 · 온체인 ${spikes.length}개 추적`;
+      statusEl.textContent = `완료! ${results.length}개 비상관 · 온체인 ${targets.length}개 추적`;
     }
   } catch (e) {
     statusEl.textContent = `에러: ${e.message}`;
