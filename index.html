@@ -137,6 +137,7 @@ let altSeasonData = null;
 // ─── 온체인 거래소 순입출금 (Etherscan V2) ───
 let etherscanKey = localStorage.getItem('etherscan_key') || '';
 let coinPlatforms = null; // CoinGecko 심볼→컨트랙트 매핑 캐시
+let binanceBases = null;  // 바이낸스 상장 베이스 심볼 Set (캐시 슬림화용)
 
 function saveEtherscanKey() {
   etherscanKey = document.getElementById('etherscanKey').value.trim();
@@ -203,9 +204,14 @@ async function loadCoinPlatforms() {
     const cnt = Object.values(c.platforms).filter(Boolean).length;
     if (!map[sym] || cnt > map[sym]._cnt) map[sym] = { ...c.platforms, _cnt: cnt, _id: c.id };
   }
-  coinPlatforms = map;
-  localStorage.setItem('cg_platforms', JSON.stringify({ t: Date.now(), d: map }));
-  return map;
+  // 바이낸스 상장 심볼만 추려 저장 (localStorage 용량 절약)
+  if (binanceBases) {
+    const slim = {};
+    for (const sym of binanceBases) if (map[sym]) slim[sym] = map[sym];
+    coinPlatforms = slim;
+  } else coinPlatforms = map;
+  try { localStorage.setItem('cg_platforms', JSON.stringify({ t: Date.now(), d: coinPlatforms })); } catch {}
+  return coinPlatforms;
 }
 
 // 특정 코인의 7일 거래소 순입출금 (USD)
@@ -436,8 +442,14 @@ function setView(v) {
   if (results.length) renderResults(results);
 }
 
-async function fetchJSON(url) {
+async function fetchJSON(url, retried) {
   const r = await fetch(url);
+  if ((r.status === 429 || r.status === 418) && !retried) {
+    // 레이트리밋 — Retry-After 만큼 대기 후 1회 재시도
+    const wait = Math.min(+(r.headers.get('retry-after')) || 3, 30);
+    await new Promise(res => setTimeout(res, wait * 1000));
+    return fetchJSON(url, true);
+  }
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
 }
@@ -550,6 +562,7 @@ function getOISignal(oiChgPct, fundingRate, todayReturn) {
 
 async function getUSDTSymbols() {
   const info = await fetchJSON(`${BINANCE_API}/exchangeInfo`);
+  binanceBases = new Set(info.symbols.map(s => s.baseAsset.toUpperCase()));
   return info.symbols
     .filter(s => {
       const b = s.baseAsset;
@@ -561,12 +574,86 @@ async function getUSDTSymbols() {
     .map(s => ({ symbol: s.symbol, base: s.baseAsset }));
 }
 
+// 단일 코인 분석 (스캔 내부 로직과 동일 — 검색·관심종목에서 재사용)
+async function analyzeSingle(symbol, period, volSpikeThreshold, btcReturns, vol24h) {
+  const base = symbol.replace(/USDT$/, '');
+  const klines = await getKlines(symbol, '1d', period + 1);
+  if (!klines || klines.length < 10) return null;
+  const returns = toReturns(klines.map(k => k.close));
+  const corr = pearsonCorrelation(btcReturns, returns) || 0;
+
+  const lastPrice = klines[klines.length-1].close;
+  const firstPrice = klines[0].close;
+  const chgPct = ((lastPrice - firstPrice) / firstPrice) * 100;
+
+  const vols = klines.map(k => k.volume);
+  const recent3 = vols.slice(-3);
+  const prevN = vols.slice(-(period+3), -3);
+  const avg3 = recent3.reduce((a,b) => a+b, 0) / recent3.length;
+  const avg30 = prevN.length >= 3 ? prevN.reduce((a,b) => a+b, 0) / prevN.length : 0;
+  const volSpikePct = avg30 > 0 ? ((avg3 - avg30) / avg30) * 100 : 0;
+  const hasVolSpike = volSpikePct >= volSpikeThreshold;
+  const avgDailyVol = vols.reduce((a,b) => a+b, 0) / vols.length;
+
+  const closes = klines.map(k => k.close);
+  const last3Returns = [];
+  for (let j = closes.length - 3; j < closes.length; j++) {
+    if (j > 0) last3Returns.push((closes[j] - closes[j-1]) / closes[j-1] * 100);
+  }
+  const avg3Return = last3Returns.length ? last3Returns.reduce((a,b) => a+b, 0) / last3Returns.length : 0;
+  const todayReturn = closes.length >= 2 ? (closes[closes.length-1] - closes[closes.length-2]) / closes[closes.length-2] * 100 : 0;
+
+  const calcMA = (arr, p) => arr.length < p ? null : arr.slice(-p).reduce((a,b) => a+b, 0) / p;
+  const ma5 = calcMA(closes, 5), ma10 = calcMA(closes, 10), ma20 = calcMA(closes, 20);
+  const maAligned = (ma5 !== null && ma10 !== null && ma20 !== null) && (ma5 > ma10 && ma10 > ma20);
+  const closesYd = closes.slice(0, -1);
+  const ma5y = calcMA(closesYd, 5), ma10y = calcMA(closesYd, 10), ma20y = calcMA(closesYd, 20);
+  const maAlignedYd = (ma5y !== null && ma10y !== null && ma20y !== null) && (ma5y > ma10y && ma10y > ma20y);
+  const maJustAligned = maAligned && !maAlignedYd;
+
+  const [futuresData, whaleData] = await Promise.all([
+    getFuturesData(symbol),
+    getWhaleRatio(symbol, lastPrice)
+  ]);
+  const oiSignal = futuresData.hasFutures ? getOISignal(futuresData.oiChgPct, futuresData.fundingRate, todayReturn) : { label: '', emoji: '', cls: '' };
+
+  const r = {
+    symbol, base, corr, klines,
+    lastPrice, chgPct, vol24h: vol24h || 0, avgDailyVol,
+    avg3Vol: avg3, avg30Vol: avg30, volSpikePct, hasVolSpike,
+    avg3Return, todayReturn, maAligned, maJustAligned, ma5, ma10, ma20,
+    ...futuresData, oiSignal, ...whaleData
+  };
+  computeScore(r);
+  return r;
+}
+
+// 상승 가능성 점수 + 강한 매수/숏 판정
+function computeScore(r) {
+  const sd = {};
+  sd.today = r.todayReturn >= 10 ? 15 : r.todayReturn >= 5 ? 12 : r.todayReturn >= 0 ? 5 : r.todayReturn >= -5 ? -3 : -10;
+  sd.avg3 = r.avg3Return >= 10 ? 20 : r.avg3Return >= 5 ? 16 : r.avg3Return >= 2 ? 12 : r.avg3Return >= 0 ? 5 : r.avg3Return >= -3 ? -3 : -10;
+  sd.ma = r.maJustAligned ? 15 : r.maAligned ? 10 : 0;
+  sd.vol = r.volSpikePct >= 200 ? 15 : r.volSpikePct >= 100 ? 10 : r.volSpikePct >= 50 ? 5 : r.volSpikePct < -30 ? -5 : 0;
+  sd.oi = 0;
+  if (r.hasFutures) sd.oi = r.oiChgPct >= 10 ? 10 : r.oiChgPct >= 5 ? 7 : r.oiChgPct >= 0 ? 3 : -3;
+  sd.fr = 0;
+  if (r.hasFutures) { const fr = r.fundingRate; sd.fr = (fr > 0 && fr <= 0.001) ? 10 : fr > 0.001 ? -5 : fr < -0.0005 ? 5 : fr < 0 ? 2 : 0; }
+  sd.squeeze = r.oiSignal.cls === 'oi-squeeze' ? 10 : 0;
+  sd.whale = r.whaleRatio >= 50 ? 5 : r.whaleRatio >= 30 ? 3 : r.whaleRatio >= 10 ? 1 : 0;
+  r.scoreDetail = sd;
+  r.bullScore = sd.today + sd.avg3 + sd.ma + sd.vol + sd.oi + sd.fr + sd.squeeze + sd.whale;
+  // 강한 매수: OI 증가 + 펀딩비 양수 + 거래량 급증 (가격 무관)
+  r.strongBuy = r.hasFutures && r.oiChgPct > 0 && r.fundingRate > 0 && r.volSpikePct >= 50;
+  // 강한 숏: OI 증가 + 펀딩비 숏우세(음수) + 거래량 급증
+  r.strongShort = r.hasFutures && r.oiChgPct > 0 && r.fundingRate < 0 && r.volSpikePct >= 50;
+}
+
 async function startScan() {
   const btn = document.getElementById('scanBtn');
   btn.disabled = true;
   btn.textContent = '스캔 중...';
   fetchAltSeasonSignal(); // 알트장 신호 백그라운드 로딩
-  loadCoinPlatforms().then(() => { if (lastRendered.length) renderResults(lastRendered); }).catch(()=>{}); // 체인 정보 백그라운드 로딩
   const statusEl = document.getElementById('statusText');
   const progressEl = document.getElementById('progressBar');
   const period = +document.getElementById('period').value;
@@ -578,6 +665,14 @@ async function startScan() {
   try {
     statusEl.textContent = '거래 가능 심볼 로딩 중...';
     const allSymbols = await getUSDTSymbols();
+    loadCoinPlatforms().then(() => { if (lastRendered.length) renderResults(lastRendered); }).catch(()=>{}); // 체인 정보 백그라운드 로딩 (바이낸스 심볼 확정 후)
+
+    // 선물(Perpetual) 상장 심볼만 후보로 — 어차피 선물 미상장은 제외되므로 요청 수 절감
+    let futSet = null;
+    try {
+      const futInfo = await fetchJSON('https://fapi.binance.com/fapi/v1/exchangeInfo');
+      futSet = new Set(futInfo.symbols.filter(x => x.status === 'TRADING' && x.contractType === 'PERPETUAL').map(x => x.symbol));
+    } catch {}
 
     statusEl.textContent = `BTC 데이터 로딩 중...`;
     const btcKlines = await getKlines('BTCUSDT', '1d', period + 1);
@@ -589,7 +684,7 @@ async function startScan() {
     const tickerMap = {};
     tickers.forEach(t => { tickerMap[t.symbol] = +t.quoteVolume; });
 
-    const candidates = allSymbols.filter(s => s.symbol !== 'BTCUSDT' && (tickerMap[s.symbol] || 0) >= minVol);
+    const candidates = allSymbols.filter(s => s.symbol !== 'BTCUSDT' && (!futSet || futSet.has(s.symbol)) && (tickerMap[s.symbol] || 0) >= minVol);
     statusEl.textContent = `${candidates.length}개 후보 코인 분석 중...`;
 
     results = [];
@@ -674,72 +769,7 @@ async function startScan() {
     }
 
     // 상승 가능성 점수 계산
-    results.forEach(r => {
-      const sd = {}; // score detail
-
-      // 오늘 수익률 (15점)
-      if (r.todayReturn >= 10) sd.today = 15;
-      else if (r.todayReturn >= 5) sd.today = 12;
-      else if (r.todayReturn >= 0) sd.today = 5;
-      else if (r.todayReturn >= -5) sd.today = -3;
-      else sd.today = -10;
-
-      // 3일 평균 손익 (20점)
-      if (r.avg3Return >= 10) sd.avg3 = 20;
-      else if (r.avg3Return >= 5) sd.avg3 = 16;
-      else if (r.avg3Return >= 2) sd.avg3 = 12;
-      else if (r.avg3Return >= 0) sd.avg3 = 5;
-      else if (r.avg3Return >= -3) sd.avg3 = -3;
-      else sd.avg3 = -10;
-
-      // 이평선 정배열 (15점)
-      if (r.maJustAligned) sd.ma = 15;
-      else if (r.maAligned) sd.ma = 10;
-      else sd.ma = 0;
-
-      // 거래량 급등 (15점)
-      if (r.volSpikePct >= 200) sd.vol = 15;
-      else if (r.volSpikePct >= 100) sd.vol = 10;
-      else if (r.volSpikePct >= 50) sd.vol = 5;
-      else if (r.volSpikePct < -30) sd.vol = -5;
-      else sd.vol = 0;
-
-      // OI 증가 (10점)
-      sd.oi = 0;
-      if (r.hasFutures) {
-        if (r.oiChgPct >= 10) sd.oi = 10;
-        else if (r.oiChgPct >= 5) sd.oi = 7;
-        else if (r.oiChgPct >= 0) sd.oi = 3;
-        else sd.oi = -3;
-      }
-
-      // 펀딩비 방향 (10점)
-      sd.fr = 0;
-      if (r.hasFutures) {
-        const fr = r.fundingRate;
-        if (fr > 0 && fr <= 0.001) sd.fr = 10;
-        else if (fr > 0.001) sd.fr = -5;
-        else if (fr < -0.0005) sd.fr = 5;
-        else if (fr < 0) sd.fr = 2;
-      }
-
-      // 숏스퀴즈 가능 (10점)
-      sd.squeeze = r.oiSignal.cls === 'oi-squeeze' ? 10 : 0;
-
-      // 고래 비중 (5점)
-      if (r.whaleRatio >= 50) sd.whale = 5;
-      else if (r.whaleRatio >= 30) sd.whale = 3;
-      else if (r.whaleRatio >= 10) sd.whale = 1;
-      else sd.whale = 0;
-
-      r.scoreDetail = sd;
-      r.bullScore = sd.today + sd.avg3 + sd.ma + sd.vol + sd.oi + sd.fr + sd.squeeze + sd.whale;
-
-      // 강한 매수 판정: OI 증가 + 펀딩비 양수 + 거래량 급증 (가격 무관)
-      r.strongBuy = r.hasFutures && r.oiChgPct > 0 && r.fundingRate > 0 && r.volSpikePct >= 50;
-      // 강한 숏 판정: OI 증가 + 펀딩비 숏우세(음수) + 거래량 급증
-      r.strongShort = r.hasFutures && r.oiChgPct > 0 && r.fundingRate < 0 && r.volSpikePct >= 50;
-    });
+    results.forEach(computeScore);
 
     // 강한 매수 우세 → 숏스퀴즈 → 점수순 정렬
     results.sort((a,b) => {
@@ -748,9 +778,20 @@ async function startScan() {
       if (aRank !== bRank) return bRank - aRank;
       return b.bullScore - a.bullScore;
     });
+    // 관심종목 중 스캔에 안 잡힌 코인은 개별 분석해 항상 표시 (상관계수 조건 무관)
+    const missingWatch = watchlist.filter(w => !results.some(r => r.symbol === w.symbol));
+    for (const w of missingWatch) {
+      try {
+        statusEl.textContent = `⭐ 관심종목 ${w.symbol} 분석 중...`;
+        const wr = await analyzeSingle(w.symbol, period, volSpikeThreshold, btcReturns, tickerMap[w.symbol] || 0);
+        if (wr) { wr.fromWatch = true; results.push(wr); }
+      } catch {}
+    }
+
     renderSummary(results, candidates.length);
     renderResults(results);
     statusEl.textContent = `완료! ${candidates.length}개 중 ${results.length}개 비상관 코인 발견`;
+    saveScanState(candidates.length);
 
     // 온체인 거래소 순입출금 (거래량 급등 + 강한매수 종목, 키 있을 때)
     if (etherscanKey) {
@@ -767,6 +808,7 @@ async function startScan() {
         if (noEl) noEl.textContent = allScanResults.filter(x => x.onchain && x.onchain.netOutUsd > 0).length;
       }
       statusEl.textContent = `완료! ${results.length}개 비상관 · 온체인 ${targets.length}개 추적`;
+      saveScanState(lastScanTotal);
     }
   } catch (e) {
     statusEl.textContent = `에러: ${e.message}`;
@@ -898,7 +940,7 @@ function renderCards(res) {
       <div class="coin-extra">
         ${r.hasFutures ? `
           <span class="tag">OI(24h) <span class="v" style="color:${r.oiChgPct >= 0 ? '#4ade80' : '#f87171'}; background:${r.oiChgPct >= 0 ? 'rgba(74,222,128,0.15)' : 'rgba(248,113,113,0.15)'}; padding:1px 5px; border-radius:3px">${r.oiChgPct >= 0 ? '▲' : '▼'} ${r.oiChgPct >= 0 ? '+' : ''}${r.oiChgPct.toFixed(1)}%</span></span>
-          <span class="tag">펀딩비 <span class="v" style="color:${r.fundingRate >= 0 ? '#4ade80' : '#f87171'}; background:${r.fundingRate >= 0 ? 'rgba(74,222,128,0.15)' : 'rgba(248,113,113,0.15)'}; padding:1px 5px; border-radius:3px">${r.fundingRate >= 0 ? '▲' : '▼'} ${(r.fundingRate * 100).toFixed(4)}%</span> <span style="color:${getFundingLabel(r.fundingRate).color};font-size:10px;font-weight:700">${getFundingLabel(r.fundingRate).txt}</span></span>
+          <span class="tag">펀딩비 <span class="v" style="color:${getFundingLabel(r.fundingRate).color}; background:rgba(148,163,184,0.12); padding:1px 5px; border-radius:3px">${r.fundingRate >= 0 ? '▲' : '▼'} ${(r.fundingRate * 100).toFixed(4)}%</span> <span style="color:${getFundingLabel(r.fundingRate).color};font-size:10px;font-weight:700">${getFundingLabel(r.fundingRate).txt}</span></span>
         ` : '<span class="tag">선물 <span class="v">없음</span></span>'}
         <span class="tag">대형주문($1K+) <span class="v">${r.whaleRatio.toFixed(1)}% (${r.whaleCount}건)</span></span>
         ${r.whaleCount > 0 ? `<span class="tag" style="min-width:80px">매수/매도<div class="whale-bar"><div class="buy" style="width:${r.whaleBuyVol + r.whaleSellVol > 0 ? (r.whaleBuyVol / (r.whaleBuyVol + r.whaleSellVol) * 100).toFixed(0) : 50}%"></div><div class="sell" style="width:${r.whaleBuyVol + r.whaleSellVol > 0 ? (r.whaleSellVol / (r.whaleBuyVol + r.whaleSellVol) * 100).toFixed(0) : 50}%"></div></div></span>` : ''}
@@ -978,7 +1020,7 @@ function renderTable(res) {
       <td class="${r.volSpikePct >= 200 ? 'pos' : r.volSpikePct >= 0 ? '' : 'neg'}" style="${r.hasVolSpike ? 'font-weight:700' : ''}">${r.volSpikePct >= 0 ? '+' : ''}${r.volSpikePct.toFixed(0)}%</td>
       <td class="${r.maAligned ? 'pos' : ''}">${r.maJustAligned ? '🚀 전환' : r.maAligned ? '📈 정배열' : '-'}</td>
       <td class="${r.oiChgPct >= 0 ? 'pos' : 'neg'}">${r.hasFutures ? (r.oiChgPct >= 0 ? '▲+' : '▼') + r.oiChgPct.toFixed(1) + '%' : '-'}</td>
-      <td class="${r.fundingRate >= 0 ? 'pos' : 'neg'}">${r.hasFutures ? (r.fundingRate >= 0 ? '▲ ' : '▼ ') + (r.fundingRate * 100).toFixed(4) + '%' : '-'}</td>
+      <td style="color:${getFundingLabel(r.fundingRate).color}">${r.hasFutures ? (r.fundingRate >= 0 ? '▲ ' : '▼ ') + (r.fundingRate * 100).toFixed(4) + '% ' + getFundingLabel(r.fundingRate).txt : '-'}</td>
       <td>${r.whaleRatio.toFixed(1)}%${r.whaleCount > 0 ? ' 🐋' : ''}</td>
     </tr>`).join('')}</tbody></table>`;
 }
@@ -986,11 +1028,12 @@ function renderTable(res) {
 let sortKey = 'corr', sortAsc = true;
 function sortTable(key) {
   if (sortKey === key) sortAsc = !sortAsc; else { sortKey = key; sortAsc = true; }
-  results.sort((a,b) => {
+  // 필터가 적용된 현재 목록 기준으로 정렬 (필터 유지)
+  const sorted = [...lastRendered].sort((a,b) => {
     const va = a[key], vb = b[key];
     return sortAsc ? (va > vb ? 1 : -1) : (va < vb ? 1 : -1);
   });
-  renderTable(results);
+  renderResults(sorted);
 }
 
 function fmtScore(v, max) {
@@ -999,7 +1042,7 @@ function fmtScore(v, max) {
 }
 
 function showScore(idx) {
-  const r = results[idx];
+  const r = lastRendered[idx]; // 화면에 그려진 목록 기준 (필터 적용 시에도 올바른 코인)
   const sd = r.scoreDetail;
   document.getElementById('scoreContent').innerHTML = `
     <div class="title">${r.base}/USDT 상승 가능성 배점</div>
@@ -1036,87 +1079,23 @@ async function searchCoin() {
   try {
     const period = +document.getElementById('period').value;
     volPeriodLabel = period + '일';
+    const volSpikeThreshold = +document.getElementById('volSpikeThreshold').value;
 
     // BTC 데이터
     const btcKlines = await getKlines('BTCUSDT', '1d', period + 1);
     const btcReturns = toReturns(btcKlines.map(k => k.close));
 
-    // 코인 데이터
-    const klines = await getKlines(symbol, '1d', period + 1);
-    if (!klines || klines.length < 10) { statusEl.textContent = `❌ ${symbol} 데이터를 찾을 수 없습니다`; return; }
+    let vol24h = 0;
+    try { const t = await fetchJSON(`${BINANCE_API}/ticker/24hr?symbol=${symbol}`); vol24h = +t.quoteVolume || 0; } catch {}
 
-    const returns = toReturns(klines.map(k => k.close));
-    const corr = pearsonCorrelation(btcReturns, returns);
-
-    const lastPrice = klines[klines.length-1].close;
-    const firstPrice = klines[0].close;
-    const chgPct = ((lastPrice - firstPrice) / firstPrice) * 100;
-
-    const vols = klines.map(k => k.volume);
-    const recent3 = vols.slice(-3);
-    const prevN = vols.slice(-(period+3), -3);
-    const avg3 = recent3.reduce((a,b) => a+b, 0) / recent3.length;
-    const avg30 = prevN.length >= 3 ? prevN.reduce((a,b) => a+b, 0) / prevN.length : 0;
-    const volSpikePct = avg30 > 0 ? ((avg3 - avg30) / avg30) * 100 : 0;
-    const volSpikeThreshold = +document.getElementById('volSpikeThreshold').value;
-    const hasVolSpike = volSpikePct >= volSpikeThreshold;
-
-    const tickers = await fetchJSON(`${BINANCE_API}/ticker/24hr?symbol=${symbol}`);
-    const vol24h = +tickers.quoteVolume || 0;
-    const avgDailyVol = vols.reduce((a,b) => a+b, 0) / vols.length;
-
-    const closes = klines.map(k => k.close);
-    const last3Returns = [];
-    for (let j = closes.length - 3; j < closes.length; j++) {
-      if (j > 0) last3Returns.push((closes[j] - closes[j-1]) / closes[j-1] * 100);
-    }
-    const avg3Return = last3Returns.length ? last3Returns.reduce((a,b) => a+b, 0) / last3Returns.length : 0;
-    const todayReturn = closes.length >= 2 ? (closes[closes.length-1] - closes[closes.length-2]) / closes[closes.length-2] * 100 : 0;
-
-    const calcMA = (arr, p) => arr.length < p ? null : arr.slice(-p).reduce((a,b) => a+b, 0) / p;
-    const ma5 = calcMA(closes, 5), ma10 = calcMA(closes, 10), ma20 = calcMA(closes, 20);
-    const maAligned = (ma5 && ma10 && ma20) && (ma5 > ma10 && ma10 > ma20);
-    const closesYd = closes.slice(0, -1);
-    const ma5y = calcMA(closesYd, 5), ma10y = calcMA(closesYd, 10), ma20y = calcMA(closesYd, 20);
-    const maAlignedYd = (ma5y && ma10y && ma20y) && (ma5y > ma10y && ma10y > ma20y);
-    const maJustAligned = maAligned && !maAlignedYd;
-
-    const [futuresData, whaleData] = await Promise.all([
-      getFuturesData(symbol),
-      getWhaleRatio(symbol, lastPrice)
-    ]);
-    const oiSignal = futuresData.hasFutures ? getOISignal(futuresData.oiChgPct, futuresData.fundingRate, todayReturn) : { label: '', emoji: '', cls: '' };
-
-    const r = {
-      symbol, base, corr: corr || 0, klines,
-      lastPrice, chgPct, vol24h, avgDailyVol,
-      avg3Vol: avg3, avg30Vol: avg30, volSpikePct, hasVolSpike,
-      avg3Return, todayReturn, maAligned, maJustAligned, ma5, ma10, ma20,
-      ...futuresData, oiSignal, ...whaleData
-    };
-
-    // 점수 계산
-    const sd = {};
-    sd.today = r.todayReturn >= 10 ? 15 : r.todayReturn >= 5 ? 12 : r.todayReturn >= 0 ? 5 : r.todayReturn >= -5 ? -3 : -10;
-    sd.avg3 = r.avg3Return >= 10 ? 20 : r.avg3Return >= 5 ? 16 : r.avg3Return >= 2 ? 12 : r.avg3Return >= 0 ? 5 : r.avg3Return >= -3 ? -3 : -10;
-    sd.ma = r.maJustAligned ? 15 : r.maAligned ? 10 : 0;
-    sd.vol = r.volSpikePct >= 200 ? 15 : r.volSpikePct >= 100 ? 10 : r.volSpikePct >= 50 ? 5 : r.volSpikePct < -30 ? -5 : 0;
-    sd.oi = 0;
-    if (r.hasFutures) { sd.oi = r.oiChgPct >= 10 ? 10 : r.oiChgPct >= 5 ? 7 : r.oiChgPct >= 0 ? 3 : -3; }
-    sd.fr = 0;
-    if (r.hasFutures) { const fr = r.fundingRate; sd.fr = (fr > 0 && fr <= 0.001) ? 10 : fr > 0.001 ? -5 : fr < -0.0005 ? 5 : fr < 0 ? 2 : 0; }
-    sd.squeeze = r.oiSignal.cls === 'oi-squeeze' ? 10 : 0;
-    sd.whale = r.whaleRatio >= 50 ? 5 : r.whaleRatio >= 30 ? 3 : r.whaleRatio >= 10 ? 1 : 0;
-    r.scoreDetail = sd;
-    r.bullScore = sd.today + sd.avg3 + sd.ma + sd.vol + sd.oi + sd.fr + sd.squeeze + sd.whale;
-    r.strongBuy = r.hasFutures && r.oiChgPct > 0 && r.fundingRate > 0 && r.volSpikePct >= 50;
-    r.strongShort = r.hasFutures && r.oiChgPct > 0 && r.fundingRate < 0 && r.volSpikePct >= 50;
+    const r = await analyzeSingle(symbol, period, volSpikeThreshold, btcReturns, vol24h);
+    if (!r) { statusEl.textContent = `❌ ${symbol} 데이터를 찾을 수 없습니다`; return; }
 
     // 검색 결과를 맨 앞에 추가하고 렌더링
     results = [r, ...results.filter(x => x.symbol !== symbol)];
     renderResults(results);
-    statusEl.textContent = `✅ ${base} 분석 완료 (점수: ${r.bullScore}, 상관계수: ${(r.corr||0).toFixed(3)})`;
-    document.getElementById('cardGrid')?.scrollIntoView({behavior:'smooth'});
+    statusEl.textContent = `✅ ${base} 분석 완료 (점수: ${r.bullScore}, 상관계수: ${r.corr.toFixed(3)})`;
+    document.getElementById('cardView')?.scrollIntoView({behavior:'smooth'});
 
     // 온체인 거래소 순입출금 (키 있을 때)
     if (etherscanKey) {
@@ -1132,10 +1111,33 @@ async function searchCoin() {
   }
 }
 
-// 초기화: 저장된 Etherscan 키 입력란에 표시
-(function initKey(){
+// 마지막 스캔 결과 저장/복원 (새로고침해도 유지)
+function saveScanState(total) {
+  try {
+    localStorage.setItem('btc_scan_cache', JSON.stringify({ t: Date.now(), total, period: volPeriodLabel, results }));
+  } catch {} // 용량 초과 시 저장만 생략
+}
+
+function restoreScanState() {
+  try {
+    const c = JSON.parse(localStorage.getItem('btc_scan_cache') || 'null');
+    if (!c || !Array.isArray(c.results) || !c.results.length) return;
+    volPeriodLabel = c.period || volPeriodLabel;
+    results = c.results;
+    renderSummary(results, c.total || results.length);
+    renderResults(results);
+    const min = Math.round((Date.now() - c.t) / 60000);
+    const ago = min < 1 ? '방금' : min < 60 ? `${min}분 전` : min < 1440 ? `${Math.round(min/60)}시간 전` : `${Math.round(min/1440)}일 전`;
+    document.getElementById('statusText').textContent = `💾 이전 스캔 결과 복원 (${ago} · ${results.length}개) — 최신 데이터는 스캔 시작을 누르세요`;
+    fetchAltSeasonSignal();
+  } catch {}
+}
+
+// 초기화: 저장된 Etherscan 키 표시 + 이전 스캔 결과 복원
+(function init(){
   const el = document.getElementById('etherscanKey');
   if (el && etherscanKey) el.value = etherscanKey;
+  restoreScanState();
 })();
 </script>
 </body>
