@@ -898,7 +898,7 @@ async function showProjectInfo(base) {
   const p = coinPlatforms ? coinPlatforms[base.toUpperCase()] : null;
   const cgId = p ? p._id : null;
   const googleUrl = `https://www.google.com/search?q=${encodeURIComponent(base + ' crypto coin team investors VC funding')}`;
-  const rootdataUrl = `https://www.rootdata.com/Search?keyword=${encodeURIComponent(base)}`;
+  let rootdataUrl = `https://www.google.com/search?q=${encodeURIComponent('rootdata.com ' + base + ' crypto')}`;
 
   if (!cgId) {
     content.innerHTML = `<span class="close" onclick="closeScorePopup()">✕</span>
@@ -913,6 +913,8 @@ async function showProjectInfo(base) {
 
   try {
     const d = await fetchJSON(`https://api.coingecko.com/api/v3/coins/${cgId}?localization=true&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false`);
+    // 프로젝트 정식명으로 RootData 검색 (더 정확)
+    if (d.name) rootdataUrl = `https://www.google.com/search?q=${encodeURIComponent('rootdata.com ' + d.name + ' funding investors')}`;
     const rank = d.market_cap_rank ? `#${d.market_cap_rank}` : '–';
     const mcap = d.market_data?.market_cap?.usd ? fmtUsd(d.market_data.market_cap.usd) : '–';
     const cats = (d.categories || []).filter(Boolean).slice(0,4);
