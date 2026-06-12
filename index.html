@@ -881,13 +881,80 @@ function fmtNum(n, d=2) {
   if (Math.abs(n) >= 1e3) return (n/1e3).toFixed(d) + 'K';
   return n.toFixed(d);
 }
-// 프로젝트 정보 링크 (CoinGecko + 배경/투자자 검색)
+// 프로젝트 정보 버튼 (클릭 시 정리된 팝업)
 function getInfoLinks(base) {
+  return `<span onclick="event.stopPropagation();showProjectInfo('${base}')" title="프로젝트 정보 보기" style="cursor:pointer;font-size:13px;margin-left:6px;vertical-align:middle;opacity:0.7">ℹ️</span>`;
+}
+
+// 프로젝트 정보 팝업 (CoinGecko 데이터로 정리)
+async function showProjectInfo(base) {
+  const overlay = document.getElementById('scoreOverlay');
+  const popup = document.getElementById('scorePopup');
+  const content = document.getElementById('scoreContent');
+  overlay.style.display = 'block';
+  popup.style.display = 'block';
+  content.innerHTML = `<span class="close" onclick="closeScorePopup()">✕</span><div class="title">${base} 프로젝트 정보</div><div style="color:#8892a4;font-size:13px;padding:20px 0">⏳ 불러오는 중...</div>`;
+
   const p = coinPlatforms ? coinPlatforms[base.toUpperCase()] : null;
   const cgId = p ? p._id : null;
-  const cg = cgId ? `<a href="https://www.coingecko.com/en/coins/${cgId}" target="_blank" onclick="event.stopPropagation()" title="CoinGecko 정보·공식링크" style="text-decoration:none;font-size:13px;margin-left:5px;vertical-align:middle">ℹ️</a>` : '';
-  const search = `<a href="https://www.google.com/search?q=${encodeURIComponent(base + ' crypto coin team investors VC funding')}" target="_blank" onclick="event.stopPropagation()" title="개발팀·투자자(VC) 검색" style="text-decoration:none;font-size:12px;margin-left:3px;vertical-align:middle">🔍</a>`;
-  return cg + search;
+  const googleUrl = `https://www.google.com/search?q=${encodeURIComponent(base + ' crypto coin team investors VC funding')}`;
+  const rootdataUrl = `https://www.rootdata.com/Search?keyword=${encodeURIComponent(base)}`;
+
+  if (!cgId) {
+    content.innerHTML = `<span class="close" onclick="closeScorePopup()">✕</span>
+      <div class="title">${base} 프로젝트 정보</div>
+      <div style="color:#8892a4;font-size:13px;margin-bottom:14px">CoinGecko 자동 정보가 없는 코인입니다. 아래에서 직접 확인하세요.</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <a href="${googleUrl}" target="_blank" style="color:#60a5fa;text-decoration:none">🔍 개발팀·투자자(VC) 구글 검색</a>
+        <a href="${rootdataUrl}" target="_blank" style="color:#60a5fa;text-decoration:none">💰 RootData (투자자 정보)</a>
+      </div>`;
+    return;
+  }
+
+  try {
+    const d = await fetchJSON(`https://api.coingecko.com/api/v3/coins/${cgId}?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false`);
+    const rank = d.market_cap_rank ? `#${d.market_cap_rank}` : '–';
+    const mcap = d.market_data?.market_cap?.usd ? fmtUsd(d.market_data.market_cap.usd) : '–';
+    const cats = (d.categories || []).filter(Boolean).slice(0,4);
+    const genesis = d.genesis_date || '–';
+    let desc = (d.description?.en || '').replace(/<[^>]*>/g, '').trim();
+    // 첫 2문장만
+    const sentences = desc.split(/(?<=[.!?])\s+/).slice(0,2).join(' ');
+    desc = sentences.length > 280 ? sentences.slice(0,280) + '…' : sentences;
+    const home = d.links?.homepage?.filter(Boolean)[0];
+    const twitter = d.links?.twitter_screen_name;
+    const github = d.links?.repos_url?.github?.filter(Boolean)[0];
+
+    content.innerHTML = `<span class="close" onclick="closeScorePopup()">✕</span>
+      <div class="title">${d.name} <span style="color:#64748b;font-size:13px">(${base})</span></div>
+      <div style="display:flex;gap:14px;margin-bottom:12px;font-size:13px">
+        <span style="color:#8892a4">시총순위 <b style="color:#e2e8f0">${rank}</b></span>
+        <span style="color:#8892a4">시총 <b style="color:#e2e8f0">${mcap}</b></span>
+        <span style="color:#8892a4">출시 <b style="color:#e2e8f0">${genesis}</b></span>
+      </div>
+      ${cats.length ? `<div style="margin-bottom:12px">${cats.map(c => `<span style="display:inline-block;font-size:11px;color:#a5b4fc;background:#312e81;padding:2px 8px;border-radius:4px;margin:0 4px 4px 0">${c}</span>`).join('')}</div>` : ''}
+      ${desc ? `<div style="font-size:12px;color:#cbd5e1;line-height:1.6;margin-bottom:14px;max-height:120px;overflow-y:auto">${desc}</div>` : ''}
+      <div style="border-top:1px solid #2a3450;padding-top:12px;display:flex;flex-direction:column;gap:7px">
+        <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:12px">
+          ${home ? `<a href="${home}" target="_blank" style="color:#60a5fa;text-decoration:none">🌐 홈페이지</a>` : ''}
+          ${twitter ? `<a href="https://x.com/${twitter}" target="_blank" style="color:#60a5fa;text-decoration:none">𝕏 트위터</a>` : ''}
+          ${github ? `<a href="${github}" target="_blank" style="color:#60a5fa;text-decoration:none">📁 GitHub</a>` : ''}
+          <a href="https://www.coingecko.com/en/coins/${cgId}" target="_blank" style="color:#60a5fa;text-decoration:none">📊 CoinGecko</a>
+        </div>
+        <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:12px">
+          <a href="${googleUrl}" target="_blank" style="color:#fbbf24;text-decoration:none">🔍 개발팀·VC 검색</a>
+          <a href="${rootdataUrl}" target="_blank" style="color:#fbbf24;text-decoration:none">💰 RootData 투자자정보</a>
+        </div>
+      </div>`;
+  } catch(e) {
+    content.innerHTML = `<span class="close" onclick="closeScorePopup()">✕</span>
+      <div class="title">${base} 프로젝트 정보</div>
+      <div style="color:#f87171;font-size:13px;margin-bottom:14px">정보 로드 실패. 직접 확인하세요.</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <a href="https://www.coingecko.com/en/coins/${cgId}" target="_blank" style="color:#60a5fa;text-decoration:none">📊 CoinGecko</a>
+        <a href="${googleUrl}" target="_blank" style="color:#60a5fa;text-decoration:none">🔍 개발팀·투자자 검색</a>
+      </div>`;
+  }
 }
 
 // 선물(OI) vs 온체인(현물) 신호 비교 해설
