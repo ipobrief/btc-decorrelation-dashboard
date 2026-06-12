@@ -194,7 +194,7 @@ function getCoinChains(base) {
 // CoinGecko 토큰 컨트랙트 매핑 로드 (1회, 1일 캐시)
 async function loadCoinPlatforms() {
   if (coinPlatforms) return coinPlatforms;
-  const cached = JSON.parse(localStorage.getItem('cg_platforms') || 'null');
+  const cached = JSON.parse(localStorage.getItem('cg_platforms_v2') || 'null');
   if (cached && Date.now() - cached.t < 86400000) { coinPlatforms = cached.d; return coinPlatforms; }
   const list = await fetchJSON('https://api.coingecko.com/api/v3/coins/list?include_platform=true');
   const map = {};
@@ -210,7 +210,7 @@ async function loadCoinPlatforms() {
     for (const sym of binanceBases) if (map[sym]) slim[sym] = map[sym];
     coinPlatforms = slim;
   } else coinPlatforms = map;
-  try { localStorage.setItem('cg_platforms', JSON.stringify({ t: Date.now(), d: coinPlatforms })); } catch {}
+  try { localStorage.setItem('cg_platforms_v2', JSON.stringify({ t: Date.now(), d: coinPlatforms })); localStorage.removeItem('cg_platforms'); } catch {}
   return coinPlatforms;
 }
 
