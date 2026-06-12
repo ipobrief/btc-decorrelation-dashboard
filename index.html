@@ -881,6 +881,15 @@ function fmtNum(n, d=2) {
   if (Math.abs(n) >= 1e3) return (n/1e3).toFixed(d) + 'K';
   return n.toFixed(d);
 }
+// 프로젝트 정보 링크 (CoinGecko + 배경/투자자 검색)
+function getInfoLinks(base) {
+  const p = coinPlatforms ? coinPlatforms[base.toUpperCase()] : null;
+  const cgId = p ? p._id : null;
+  const cg = cgId ? `<a href="https://www.coingecko.com/en/coins/${cgId}" target="_blank" onclick="event.stopPropagation()" title="CoinGecko 정보·공식링크" style="text-decoration:none;font-size:13px;margin-left:5px;vertical-align:middle">ℹ️</a>` : '';
+  const search = `<a href="https://www.google.com/search?q=${encodeURIComponent(base + ' crypto coin team investors VC funding')}" target="_blank" onclick="event.stopPropagation()" title="개발팀·투자자(VC) 검색" style="text-decoration:none;font-size:12px;margin-left:3px;vertical-align:middle">🔍</a>`;
+  return cg + search;
+}
+
 // 선물(OI) vs 온체인(현물) 신호 비교 해설
 function getFlowComment(r) {
   if (!r.onchain) return null;
@@ -918,7 +927,7 @@ function renderCards(res) {
   grid.innerHTML = res.map((r, i) => `
     <div class="coin-card${r.corr < 0 ? ' highlight' : ''}${r.hasVolSpike ? ' vol-spike' : ''}">
       <div class="coin-header">
-        <div class="coin-name"><span onclick="toggleWatch('${r.symbol}', ${r.lastPrice}, event)" style="cursor:pointer;font-size:17px;margin-right:5px;color:${isWatched(r.symbol) ? '#fbbf24' : '#475569'};vertical-align:middle" title="관심종목">${isWatched(r.symbol) ? '★' : '☆'}</span>${r.base}<small>/USDT</small>${(() => { const ch = getCoinChains(r.base); return ch.length ? ' ' + ch.map(c => `<span style="font-size:9px;font-weight:700;color:#94a3b8;background:#1e293b;padding:1px 5px;border-radius:3px;vertical-align:middle">${c}</span>`).join(' ') : ''; })()} <span class="score-btn" onclick="event.stopPropagation();showScore(${i})" style="font-size:12px; padding:2px 6px; border-radius:4px; font-weight:700; background:${r.bullScore >= 50 ? '#166534' : r.bullScore >= 30 ? '#14532d' : r.bullScore >= 10 ? '#1e3a1e' : r.bullScore >= 0 ? '#1e293b' : '#451a1a'}; color:${r.bullScore >= 30 ? '#4ade80' : r.bullScore >= 10 ? '#86efac' : r.bullScore >= 0 ? '#94a3b8' : '#f87171'}">${r.bullScore}점</span>${(() => { const w = getWatch(r.symbol); if (!w || !w.date || !w.price) return ''; const ret = (r.lastPrice - w.price) / w.price * 100; return `<span style="font-size:11px;margin-left:8px;color:#8892a4">⭐${w.date.slice(5)} 등록 · <b style="color:${ret>=0?'#4ade80':'#f87171'}">${ret>=0?'+':''}${ret.toFixed(1)}%</b></span>`; })()}</div>
+        <div class="coin-name"><span onclick="toggleWatch('${r.symbol}', ${r.lastPrice}, event)" style="cursor:pointer;font-size:17px;margin-right:5px;color:${isWatched(r.symbol) ? '#fbbf24' : '#475569'};vertical-align:middle" title="관심종목">${isWatched(r.symbol) ? '★' : '☆'}</span>${r.base}<small>/USDT</small>${(() => { const ch = getCoinChains(r.base); return ch.length ? ' ' + ch.map(c => `<span style="font-size:9px;font-weight:700;color:#94a3b8;background:#1e293b;padding:1px 5px;border-radius:3px;vertical-align:middle">${c}</span>`).join(' ') : ''; })()} <span class="score-btn" onclick="event.stopPropagation();showScore(${i})" style="font-size:12px; padding:2px 6px; border-radius:4px; font-weight:700; background:${r.bullScore >= 50 ? '#166534' : r.bullScore >= 30 ? '#14532d' : r.bullScore >= 10 ? '#1e3a1e' : r.bullScore >= 0 ? '#1e293b' : '#451a1a'}; color:${r.bullScore >= 30 ? '#4ade80' : r.bullScore >= 10 ? '#86efac' : r.bullScore >= 0 ? '#94a3b8' : '#f87171'}">${r.bullScore}점</span>${getInfoLinks(r.base)}${(() => { const w = getWatch(r.symbol); if (!w || !w.date || !w.price) return ''; const ret = (r.lastPrice - w.price) / w.price * 100; return `<span style="font-size:11px;margin-left:8px;color:#8892a4">⭐${w.date.slice(5)} 등록 · <b style="color:${ret>=0?'#4ade80':'#f87171'}">${ret>=0?'+':''}${ret.toFixed(1)}%</b></span>`; })()}</div>
         <div class="coin-badges">
           ${r.strongBuy ? `<span class="badge ma-just">💪 강한 매수<span class="tip">OI 증가 + 펀딩비 양수 + 거래량 급증 = 롱 진입 활발${r.todayReturn >= 0 ? ' (양봉 동반)' : ' (음봉 — 저점 매집 가능)'}</span></span>` : ''}
           ${r.strongShort ? `<span class="badge" style="background:#7f1d1d;color:#fca5a5;animation:pulse 1.5s infinite">📉 강한 숏<span class="tip">OI 증가 + 펀딩비 숏우세 + 거래량 급증 = 숏 진입 활발${r.todayReturn < 0 ? ' (음봉 동반)' : ' (양봉 — 숏스퀴즈 주의)'}</span></span>` : ''}
