@@ -912,15 +912,23 @@ async function showProjectInfo(base) {
   }
 
   try {
-    const d = await fetchJSON(`https://api.coingecko.com/api/v3/coins/${cgId}?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false`);
+    const d = await fetchJSON(`https://api.coingecko.com/api/v3/coins/${cgId}?localization=true&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false`);
     const rank = d.market_cap_rank ? `#${d.market_cap_rank}` : '–';
     const mcap = d.market_data?.market_cap?.usd ? fmtUsd(d.market_data.market_cap.usd) : '–';
     const cats = (d.categories || []).filter(Boolean).slice(0,4);
     const genesis = d.genesis_date || '–';
-    let desc = (d.description?.en || '').replace(/<[^>]*>/g, '').trim();
+    let desc = (d.description?.ko || d.description?.en || '').replace(/<[^>]*>/g, '').trim();
     // 첫 2문장만
     const sentences = desc.split(/(?<=[.!?])\s+/).slice(0,2).join(' ');
     desc = sentences.length > 280 ? sentences.slice(0,280) + '…' : sentences;
+    // 영문이면 한글로 번역 (Google 무료 번역)
+    if (desc && /[a-zA-Z]/.test(desc) && !d.description?.ko) {
+      try {
+        const tr = await fetchJSON(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=ko&dt=t&q=${encodeURIComponent(desc)}`);
+        const translated = tr[0].map(x => x[0]).join('');
+        if (translated) desc = translated;
+      } catch {}
+    }
     const home = d.links?.homepage?.filter(Boolean)[0];
     const twitter = d.links?.twitter_screen_name;
     const github = d.links?.repos_url?.github?.filter(Boolean)[0];
