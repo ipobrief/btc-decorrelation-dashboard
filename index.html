@@ -932,6 +932,8 @@ async function showProjectInfo(base) {
     const home = d.links?.homepage?.filter(Boolean)[0];
     const twitter = d.links?.twitter_screen_name;
     const github = d.links?.repos_url?.github?.filter(Boolean)[0];
+    const discord = d.links?.chat_url?.find(u => u && u.includes('discord'));
+    const telegram = d.links?.telegram_channel_identifier;
 
     content.innerHTML = `<span class="close" onclick="closeScorePopup()">✕</span>
       <div class="title">${d.name} <span style="color:#64748b;font-size:13px">(${base})</span></div>
@@ -946,6 +948,8 @@ async function showProjectInfo(base) {
         <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:12px">
           ${home ? `<a href="${home}" target="_blank" style="color:#60a5fa;text-decoration:none">🌐 홈페이지</a>` : ''}
           ${twitter ? `<a href="https://x.com/${twitter}" target="_blank" style="color:#60a5fa;text-decoration:none">𝕏 트위터</a>` : ''}
+          ${discord ? `<a href="${discord}" target="_blank" style="color:#60a5fa;text-decoration:none">💬 디스코드</a>` : ''}
+          ${telegram ? `<a href="https://t.me/${telegram}" target="_blank" style="color:#60a5fa;text-decoration:none">✈️ 텔레그램</a>` : ''}
           ${github ? `<a href="${github}" target="_blank" style="color:#60a5fa;text-decoration:none">📁 GitHub</a>` : ''}
           <a href="https://www.coingecko.com/en/coins/${cgId}" target="_blank" style="color:#60a5fa;text-decoration:none">📊 CoinGecko</a>
         </div>
