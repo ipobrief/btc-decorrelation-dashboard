@@ -214,14 +214,14 @@ async function loadCoinPlatforms() {
   return coinPlatforms;
 }
 
-// 특정 코인의 7일 거래소 순입출금 (USD)
-async function getOnchainFlow(base, price) {
+// 특정 코인의 거래소 순입출금 (USD) — days 기간 기준
+async function getOnchainFlow(base, price, days = 7) {
   if (!etherscanKey) return null;
   try {
     const platforms = await loadCoinPlatforms();
     const p = platforms[base.toUpperCase()];
     if (!p) return null;
-    const cutoff = Math.floor(Date.now()/1000) - 7*86400;
+    const cutoff = Math.floor(Date.now()/1000) - days*86400;
     let totalIn = 0, totalOut = 0, found = false, decimals = 18;
     const known = new Set(CHAINS.flatMap(c => c.wallets.map(w => w.toLowerCase())));
     const recvMap = {}; // 거래소에서 받아간 지갑 (매집 주체)
@@ -296,7 +296,7 @@ async function getOnchainFlow(base, price) {
       }
     }
 
-    return { netOutUsd, inUsd: totalIn*price, outUsd: totalOut*price, mcap, pctMcap, whales, side: netOutTokens>=0?'recv':'send' };
+    return { netOutUsd, inUsd: totalIn*price, outUsd: totalOut*price, mcap, pctMcap, whales, side: netOutTokens>=0?'recv':'send', days };
   } catch { return null; }
 }
 
@@ -799,7 +799,7 @@ async function startScan() {
       statusEl.textContent = `⛓️ 거래량급등+강한매수 ${targets.length}개 온체인 추적 중...`;
       let done = 0;
       for (const r of targets) {
-        r.onchain = await getOnchainFlow(r.base, r.lastPrice);
+        r.onchain = await getOnchainFlow(r.base, r.lastPrice, period);
         done++;
         statusEl.textContent = `⛓️ 온체인 추적 ${done}/${targets.length} (${r.base})`;
         renderResults(lastRendered); // 점진 갱신
@@ -1012,7 +1012,7 @@ function renderCards(res) {
         <div class="coin-badges">
           ${r.strongBuy ? `<span class="badge ma-just">💪 강한 매수<span class="tip">OI 증가 + 펀딩비 양수 + 거래량 급증 = 롱 진입 활발${r.todayReturn >= 0 ? ' (양봉 동반)' : ' (음봉 — 저점 매집 가능)'}</span></span>` : ''}
           ${r.strongShort ? `<span class="badge" style="background:#7f1d1d;color:#fca5a5;animation:pulse 1.5s infinite">📉 강한 숏<span class="tip">OI 증가 + 펀딩비 숏우세 + 거래량 급증 = 숏 진입 활발${r.todayReturn < 0 ? ' (음봉 동반)' : ' (양봉 — 숏스퀴즈 주의)'}</span></span>` : ''}
-          ${r.onchain ? `<span class="badge" style="background:${r.onchain.netOutUsd >= 0 ? '#14532d' : '#451a1a'};color:${r.onchain.netOutUsd >= 0 ? '#4ade80' : '#f87171'}">⛓️ ${r.onchain.netOutUsd >= 0 ? '순유출' : '순유입'} ${fmtUsd(Math.abs(r.onchain.netOutUsd))}${r.onchain.pctMcap != null ? ` (시총 ${r.onchain.pctMcap.toFixed(2)}%)` : ''}<span class="tip">7일 바이낸스 핫월렛 ${r.onchain.netOutUsd >= 0 ? '순유출(매집 정황) — 거래소 밖으로 빠져나감' : '순유입(매도 정황) — 거래소로 들어옴'}<br>유출 ${fmtUsd(r.onchain.outUsd)} / 유입 ${fmtUsd(r.onchain.inUsd)}${r.onchain.pctMcap != null ? `<br>시총 대비 ${r.onchain.pctMcap.toFixed(2)}% ${r.onchain.pctMcap >= 1 ? '(영향력 큼)' : '(미미)'}` : ''}</span></span>` : ''}
+          ${r.onchain ? `<span class="badge" style="background:${r.onchain.netOutUsd >= 0 ? '#14532d' : '#451a1a'};color:${r.onchain.netOutUsd >= 0 ? '#4ade80' : '#f87171'}">⛓️ ${r.onchain.netOutUsd >= 0 ? '순유출' : '순유입'} ${fmtUsd(Math.abs(r.onchain.netOutUsd))}${r.onchain.pctMcap != null ? ` (시총 ${r.onchain.pctMcap.toFixed(2)}%)` : ''}<span class="tip">${r.onchain.days||7}일 바이낸스 핫월렛 ${r.onchain.netOutUsd >= 0 ? '순유출(매집 정황) — 거래소 밖으로 빠져나감' : '순유입(매도 정황) — 거래소로 들어옴'}<br>유출 ${fmtUsd(r.onchain.outUsd)} / 유입 ${fmtUsd(r.onchain.inUsd)}${r.onchain.pctMcap != null ? `<br>시총 대비 ${r.onchain.pctMcap.toFixed(2)}% ${r.onchain.pctMcap >= 1 ? '(영향력 큼)' : '(미미)'}` : ''}</span></span>` : ''}
           <span class="badge corr">ρ = ${r.corr.toFixed(3)}<span class="tip">BTC와의 상관계수 (${Math.abs(r.corr) < 0.1 ? '거의 무관' : (Math.abs(r.corr) < 0.3 ? '약한 ' : Math.abs(r.corr) < 0.5 ? '보통 ' : Math.abs(r.corr) < 0.7 ? '강한 ' : '매우 강한 ') + (r.corr < 0 ? '역상관' : '상관')})</span></span>
           ${r.hasVolSpike ? `<span class="badge vol-spike">🔥 거래량 +${r.volSpikePct.toFixed(0)}%<span class="tip">3일 평균 거래량이 ${volPeriodLabel} 평균 대비 ${r.volSpikePct.toFixed(0)}% 급등</span></span>` : `<span class="badge ${r.volSpikePct >= 0 ? 'vol-up' : 'vol-down'}">거래량 ${r.volSpikePct >= 0 ? '+' : ''}${r.volSpikePct.toFixed(0)}%<span class="tip">3일 평균 거래량 vs ${volPeriodLabel} 평균 변화율</span></span>`}
           <span class="badge ${r.todayReturn >= 0 ? 'vol-up' : 'vol-down'}">오늘 ${r.todayReturn >= 0 ? '+' : ''}${r.todayReturn.toFixed(1)}%<span class="tip">오늘 하루 수익률 (전일 종가 대비)</span></span>
@@ -1190,7 +1190,7 @@ async function searchCoin() {
     // 온체인 거래소 순입출금 (키 있을 때)
     if (etherscanKey) {
       statusEl.textContent = `⛓️ ${base} 온체인 추적 중...`;
-      r.onchain = await getOnchainFlow(r.base, r.lastPrice);
+      r.onchain = await getOnchainFlow(r.base, r.lastPrice, period);
       renderResults(results);
       statusEl.textContent = r.onchain
         ? `✅ ${base} · 온체인 ${r.onchain.netOutUsd>=0?'순유출':'순유입'} ${fmtUsd(Math.abs(r.onchain.netOutUsd))}`
