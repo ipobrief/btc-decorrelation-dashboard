@@ -1191,6 +1191,11 @@ async function searchCoin() {
     if (etherscanKey) {
       statusEl.textContent = `⛓️ ${base} 온체인 추적 중...`;
       r.onchain = await getOnchainFlow(r.base, r.lastPrice, period);
+      // 스캔 결과에 같은 코인 있으면 온체인 반영 + 순유출 카운트 갱신
+      const ex = allScanResults.find(x => x.symbol === r.symbol);
+      if (ex) ex.onchain = r.onchain;
+      const noEl = document.getElementById('netOutCount');
+      if (noEl) noEl.textContent = allScanResults.filter(x => x.onchain && x.onchain.netOutUsd > 0).length;
       renderResults(results);
       statusEl.textContent = r.onchain
         ? `✅ ${base} · 온체인 ${r.onchain.netOutUsd>=0?'순유출':'순유입'} ${fmtUsd(Math.abs(r.onchain.netOutUsd))}`
